@@ -50,6 +50,18 @@ pub enum Error {
     /// error parsing log filter
     #[error("error parsing log filter: {0}")]
     LogFilterParseError(#[from] tracing_subscriber::filter::ParseError),
+    /// error determining current user home directory
+    #[error("error determining current user home directory")]
+    HomeDirError,
+    /// local chat file not found
+    #[error("local chat file not found: {0}")]
+    LocalChatFileNotFound(std::path::PathBuf),
+    /// error created MuxedLines
+    #[error("error creating MuxedLines: {0}")]
+    MuxedLinesError(std::io::Error),
+    /// error adding file to MuxedLines
+    #[error("error adding file to MuxedLines: {0}")]
+    MuxedLinesAddFileError(std::io::Error),
 }
 
 /// The Clap type for all the commandline parameters
@@ -59,7 +71,166 @@ pub enum Error {
        author = clap::crate_authors!(),
        version = clap::crate_version!(),
        )]
-struct Options {}
+struct Options {
+    /// name of the logged in avatar whose chat.txt log file to watch (not display name)
+    #[clap(long)]
+    avatar_name: String,
+}
+
+/// represents Second Life region coordinates
+#[derive(Debug, Clone)]
+pub struct SecondLifeRegionCoordinates {
+    /// x
+    pub x: i16,
+    /// y
+    pub y: i16,
+    /// z
+    pub z: i16,
+}
+
+/// represents a Second Life Location
+#[derive(Debug, Clone)]
+pub struct SecondLifeLocation {
+    /// region name
+    pub region_name: String,
+    /// coordinates
+    pub coordinates: SecondLifeRegionCoordinates,
+}
+
+/// represents a Second Life system message
+#[derive(Debug, Clone)]
+pub enum SecondLifeSystemMessage {
+    /// message about a saved snapshot
+    SavedSnapshotMessage {
+        /// the snapshot filename
+        filename: std::path::PathBuf,
+    },
+    /// message about a sent payment
+    SentPaymentMessage {
+        /// the recipient avatar UUID
+        recipient_avatar_key: uuid::Uuid,
+        /// the amount paid
+        amount: u64,
+    },
+    /// message about a received payment
+    ReceivedPaymentMessage {
+        /// the sender avatar UUID
+        sender_avatar_key: uuid::Uuid,
+        /// the amount received
+        amount: u64,
+    },
+    /// message about a song playing on stream
+    NowPlayingMessage {
+        /// the song name
+        song_name: String,
+    },
+    /// message about a completed teleport
+    TeleportCompletedMessage {
+        /// teleported originated at this location
+        origin: SecondLifeLocation,
+    },
+    /// message about a region restart of the region that the avatar is in
+    RegionRestartMessage,
+    /// message about an object giving the current avatar an object
+    ObjectGaveObjectMessage {
+        /// the giving object name
+        giving_object_name: String,
+        /// the giving object location
+        giving_object_location: SecondLifeLocation,
+        /// the giving object owner
+        giving_object_owner: uuid::Uuid,
+        /// the name of the given object
+        given_object_name: String,
+    },
+    /// message about an avatar giving the current avatar an object
+    AvatarGaveObjectMessage {
+        /// the giving avatar name
+        giving_avatar_name: String,
+        /// the name of the given object
+        given_object_name: String,
+    },
+    /// other system message
+    OtherSystemMessage {
+        /// the raw message
+        message: String,
+    },
+}
+
+/// represents a Second Life chat volume
+#[derive(Debug, Clone)]
+pub enum SecondLifeChatVolume {
+    /// whisper (10m)
+    Whisper,
+    /// say (20m, default, a.k.a. chat range)
+    Say,
+    /// shout (100m)
+    Shout,
+    /// region say (the whole region)
+    RegionSay,
+}
+
+/// represents a Second Life avatar related message
+#[derive(Debug, Clone)]
+pub enum SecondLifeAvatarMessage {
+    /// a message about the avatar whispering, saying or shouting something
+    Chat {
+        /// how "loud" the message was (whisper, say, shout or region say)
+        volume: SecondLifeChatVolume,
+        /// the chat message
+        message: String,
+    },
+    /// a message about an avatar coming online
+    CameOnline,
+    /// a message about an avatar going offline
+    WentOffline,
+    /// a message about an avatar entering chat range
+    EnteredChatRange {
+        /// the distance where the avatar entered chat range in meters
+        distance: Option<f64>,
+    },
+    /// a message about an avatar leaving chat range
+    LeftChatRange,
+    /// a message about an avatar entering draw distance
+    EnteredDrawDistance {
+        /// the distance where the avatar entered draw distance in meters
+        distance: Option<f64>,
+    },
+    /// a message about an avatar leaving draw distance
+    LeftDrawDistance,
+    /// a message about an avatar entering the region
+    EnteredRegion {
+        /// the distance where the avatar entered the region in meters
+        distance: Option<f64>,
+    },
+    /// a message about an avatar leaving the region
+    LeftRegion,
+}
+
+/// represents an event commemorated in the Second Life chat log
+#[derive(Debug, Clone)]
+pub enum SecondLifeChatLogEvent {
+    /// line about an avatar (or an object doing things indistinguishable from an avatar in the chat log)
+    AvatarLine {
+        /// name of the avatar
+        username: String,
+        /// message
+        message: SecondLifeAvatarMessage,
+    },
+    /// a message by the Second Life viewer or server itself
+    SystemMessage {
+        /// the system message
+        message: SecondLifeSystemMessage,
+    },
+}
+
+/// represents a Second Life chat log line
+#[derive(Debug, Clone)]
+pub struct SecondLifeChatLogLine {
+    /// timestamp of the chat log line
+    timestamp: time::PrimitiveDateTime,
+    /// event that happened at that time
+    event: SecondLifeChatLogEvent,
+}
 
 /// The main behaviour of the binary should go here
 #[instrument]
@@ -67,7 +238,36 @@ async fn do_stuff() -> Result<(), crate::Error> {
     let options = Options::parse();
     tracing::debug!("{:#?}", options);
 
-    // main code goes here
+    let avatar_dir_name = options.avatar_name.replace(" ", "_").to_lowercase();
+    tracing::debug!("Avatar dir name: {}", avatar_dir_name);
+
+    let Some(home_dir) = dirs2::home_dir() else {
+        tracing::error!("Could not determine current user home directory");
+        return Err(crate::Error::HomeDirError);
+    };
+
+    let avatar_dir = home_dir.join(".firestorm/").join(avatar_dir_name);
+
+    let local_chat_log_file = avatar_dir.join("chat.txt");
+
+    if !local_chat_log_file.exists() {
+        tracing::error!(
+            "Local chat log {} does not exist for this avatar",
+            local_chat_log_file.display()
+        );
+        return Err(crate::Error::LocalChatFileNotFound(local_chat_log_file));
+    }
+
+    let mut lines = linemux::MuxedLines::new().map_err(crate::Error::MuxedLinesError)?;
+
+    lines
+        .add_file(local_chat_log_file)
+        .await
+        .map_err(crate::Error::MuxedLinesAddFileError)?;
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        println!("source: {}, line: {}", line.source().display(), line.line());
+    }
 
     Ok(())
 }
