@@ -31,12 +31,13 @@
 #![warn(clippy::expect_used)]
 #![doc = include_str!("../../README.md")]
 
-use clap::Parser;
-
 use tracing::instrument;
 use tracing_subscriber::{
     filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer, Registry,
 };
+
+use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
+use chumsky::{prelude::*, text::digits, Parser};
 
 /// Error enum for the application
 #[derive(thiserror::Error, Debug)]
@@ -62,6 +63,9 @@ pub enum Error {
     /// error adding file to MuxedLines
     #[error("error adding file to MuxedLines: {0}")]
     MuxedLinesAddFileError(std::io::Error),
+    /// error parsing chat log line
+    #[error("error parsing chat log line: {0}")]
+    ChatLogLineParseError(ChumskyError),
 }
 
 /// The Clap type for all the commandline parameters
@@ -77,6 +81,97 @@ struct Options {
     avatar_name: String,
 }
 
+/// a wrapped error in case parsing fails to get proper error output
+/// the chumsky errors themselves lack Display and std::error::Error
+/// implementations
+#[derive(Debug)]
+pub struct ChumskyError {
+    /// description of the object we were trying to parse
+    pub description: String,
+    /// source string for parsing
+    pub source: String,
+    /// errors encountered during parsing
+    pub errors: Vec<chumsky::error::Simple<char>>,
+}
+
+impl std::fmt::Display for ChumskyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for e in &self.errors {
+            let msg = format!(
+                "While parsing {}: {}{}, expected {}",
+                self.description,
+                if e.found().is_some() {
+                    "Unexpected token"
+                } else {
+                    "Unexpected end of input"
+                },
+                if let Some(label) = e.label() {
+                    format!(" while parsing {}", label)
+                } else {
+                    String::new()
+                },
+                if e.expected().len() == 0 {
+                    "end of input".to_string()
+                } else {
+                    e.expected()
+                        .map(|expected| match expected {
+                            Some(expected) => expected.to_string(),
+                            None => "end of input".to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+            );
+
+            let report = Report::build(ReportKind::Error, (), e.span().start)
+                .with_code(3)
+                .with_message(msg)
+                .with_label(
+                    Label::new(e.span())
+                        .with_message(format!(
+                            "Unexpected {}",
+                            e.found()
+                                .map(|c| format!("token {}", c.fg(Color::Red)))
+                                .unwrap_or_else(|| "end of input".to_string())
+                        ))
+                        .with_color(Color::Red),
+                );
+
+            let report = match e.reason() {
+                chumsky::error::SimpleReason::Unclosed { span, delimiter } => report.with_label(
+                    Label::new(span.clone())
+                        .with_message(format!(
+                            "Unclosed delimiter {}",
+                            delimiter.fg(Color::Yellow)
+                        ))
+                        .with_color(Color::Yellow),
+                ),
+                chumsky::error::SimpleReason::Unexpected => report,
+                chumsky::error::SimpleReason::Custom(msg) => report.with_label(
+                    Label::new(e.span())
+                        .with_message(format!("{}", msg.fg(Color::Yellow)))
+                        .with_color(Color::Yellow),
+                ),
+            };
+
+            let mut s: Vec<u8> = Vec::new();
+            report
+                .finish()
+                .write(Source::from(&self.source), &mut s)
+                .map_err(|_| <std::fmt::Error as std::default::Default>::default())?;
+            let s = std::str::from_utf8(&s).expect("Expected ariadne to generate valid UTF-8");
+            write!(f, "{}", s)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ChumskyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
 /// represents Second Life region coordinates
 #[derive(Debug, Clone)]
 pub struct SecondLifeRegionCoordinates {
@@ -88,13 +183,177 @@ pub struct SecondLifeRegionCoordinates {
     pub z: i16,
 }
 
+/// parse a string like "10/20/30" into a SecondLifeRegionCoordinates
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn slash_separated_coordinate_parser(
+) -> impl Parser<char, SecondLifeRegionCoordinates, Error = Simple<char>> {
+    digits(10)
+        .separated_by(just('/'))
+        .exactly(3)
+        .try_map(|x, span: std::ops::Range<usize>| {
+            Ok(SecondLifeRegionCoordinates {
+                x: x[0]
+                    .parse()
+                    .map_err(|e| Simple::custom(span.clone(), format!("{:?}", e)))?,
+                y: x[1]
+                    .parse()
+                    .map_err(|e| Simple::custom(span.clone(), format!("{:?}", e)))?,
+                z: x[2]
+                    .parse()
+                    .map_err(|e| Simple::custom(span.clone(), format!("{:?}", e)))?,
+            })
+        })
+}
+
+/// represent a Second Life region name
+#[derive(Debug, Clone)]
+pub struct SecondLifeRegionName(String);
+
+/// parse a string into a SecondLifeRegionName
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn region_name_parser() -> impl Parser<char, SecondLifeRegionName, Error = Simple<char>> {
+    text::ident().map(SecondLifeRegionName)
+}
+
 /// represents a Second Life Location
 #[derive(Debug, Clone)]
 pub struct SecondLifeLocation {
     /// region name
-    pub region_name: String,
+    pub region_name: SecondLifeRegionName,
     /// coordinates
     pub coordinates: SecondLifeRegionCoordinates,
+}
+
+/// parse a string like "DaBoom/10/20/30" into a SecondLifeLocation
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn location_parser() -> impl Parser<char, SecondLifeLocation, Error = Simple<char>> {
+    region_name_parser()
+        .then_ignore(just('/'))
+        .then(slash_separated_coordinate_parser())
+        .map(|(region_name, coordinates)| SecondLifeLocation {
+            region_name,
+            coordinates,
+        })
+}
+
+/// represents a Second Life avatar key (UUID)
+#[derive(Debug, Clone)]
+pub struct SecondLifeAvatarKey(uuid::Uuid);
+
+/// parse a UUID
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn uuid_parser() -> impl Parser<char, uuid::Uuid, Error = Simple<char>> {
+    one_of("0123456789abcdef")
+        .repeated()
+        .exactly(6)
+        .collect::<String>()
+        .then_ignore(just('-'))
+        .then(
+            one_of("0123456789abcdef")
+                .repeated()
+                .exactly(4)
+                .collect::<String>(),
+        )
+        .then_ignore(just('-'))
+        .then(
+            one_of("0123456789abcdef")
+                .repeated()
+                .exactly(4)
+                .collect::<String>(),
+        )
+        .then_ignore(just('-'))
+        .then(
+            one_of("0123456789abcdef")
+                .repeated()
+                .exactly(4)
+                .collect::<String>(),
+        )
+        .then_ignore(just('-'))
+        .then(
+            one_of("0123456789abcdef")
+                .repeated()
+                .exactly(12)
+                .collect::<String>(),
+        )
+        .try_map(|((((a, b), c), d), e), span: std::ops::Range<usize>| {
+            Ok(
+                uuid::Uuid::parse_str(&format!("{}-{}-{}-{}-{}", a, b, c, d, e))
+                    .map_err(|e| Simple::custom(span.clone(), format!("{:?}", e)))?,
+            )
+        })
+}
+
+/// parse an agent URL into a SecondLifeAvatarKey
+///
+/// "secondlife:///app/agent/daf2e68d-6ccc-4592-a049-3306e4820821/about"
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn agent_url_as_avatar_key_parser(
+) -> impl Parser<char, SecondLifeAvatarKey, Error = Simple<char>> {
+    just("secondlife:///app/agent/")
+        .ignore_then(uuid_parser())
+        .then_ignore(just("/about"))
+        .map(|uuid| SecondLifeAvatarKey(uuid))
+}
+
+/// represents a L$ amount
+#[derive(Debug, Clone)]
+pub struct SecondLifeLindenAmount(u64);
+
+/// parse a Linden amount
+///
+/// "L$1234"
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn linden_amount_parser() -> impl Parser<char, SecondLifeLindenAmount, Error = Simple<char>> {
+    just("L$")
+        .ignore_then(digits(10))
+        .try_map(|x: String, span: std::ops::Range<usize>| {
+            Ok(SecondLifeLindenAmount(x.parse().map_err(|e| {
+                Simple::custom(span.clone(), format!("{:?}", e))
+            })?))
+        })
+}
+
+/// represents a Second Life distance in meters
+#[derive(Debug, Clone)]
+pub struct SecondLifeDistance(f64);
+
+/// parse a distance
+///
+/// "235.23 m"
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn distance_parser() -> impl Parser<char, SecondLifeDistance, Error = Simple<char>> {
+    digits(10)
+        .then_ignore(just('.'))
+        .then(digits(10))
+        .then_ignore(just(" m"))
+        .try_map(|(full, decimal), span: std::ops::Range<usize>| {
+            Ok(SecondLifeDistance(
+                format!("{}.{}", full, decimal)
+                    .parse()
+                    .map_err(|e| Simple::custom(span.clone(), format!("{:?}", e)))?,
+            ))
+        })
 }
 
 /// represents a Second Life system message
@@ -105,19 +364,21 @@ pub enum SecondLifeSystemMessage {
         /// the snapshot filename
         filename: std::path::PathBuf,
     },
+    /// message about a saved attachment
+    AttachmentSavedMessage,
     /// message about a sent payment
     SentPaymentMessage {
         /// the recipient avatar UUID
-        recipient_avatar_key: uuid::Uuid,
+        recipient_avatar_key: SecondLifeAvatarKey,
         /// the amount paid
-        amount: u64,
+        amount: SecondLifeLindenAmount,
     },
     /// message about a received payment
     ReceivedPaymentMessage {
         /// the sender avatar UUID
-        sender_avatar_key: uuid::Uuid,
+        sender_avatar_key: SecondLifeAvatarKey,
         /// the amount received
-        amount: u64,
+        amount: SecondLifeLindenAmount,
     },
     /// message about a song playing on stream
     NowPlayingMessage {
@@ -138,7 +399,7 @@ pub enum SecondLifeSystemMessage {
         /// the giving object location
         giving_object_location: SecondLifeLocation,
         /// the giving object owner
-        giving_object_owner: uuid::Uuid,
+        giving_object_owner: SecondLifeAvatarKey,
         /// the name of the given object
         given_object_name: String,
     },
@@ -156,6 +417,21 @@ pub enum SecondLifeSystemMessage {
     },
 }
 
+/// parse a Second Life system message
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn system_message_parser() -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    // TODO: implement properly
+    any()
+        .repeated()
+        .collect::<String>()
+        .try_map(|s, _span: std::ops::Range<usize>| {
+            Ok(SecondLifeSystemMessage::OtherSystemMessage { message: s })
+        })
+}
+
 /// represents a Second Life chat volume
 #[derive(Debug, Clone)]
 pub enum SecondLifeChatVolume {
@@ -167,6 +443,17 @@ pub enum SecondLifeChatVolume {
     Shout,
     /// region say (the whole region)
     RegionSay,
+}
+
+/// represents a Second Life area of significance
+#[derive(Debug, Clone)]
+pub enum SecondLifeArea {
+    /// chat range
+    ChatRange,
+    /// draw distance
+    DrawDistance,
+    /// region
+    Region,
 }
 
 /// represents a Second Life avatar related message
@@ -183,27 +470,36 @@ pub enum SecondLifeAvatarMessage {
     CameOnline,
     /// a message about an avatar going offline
     WentOffline,
-    /// a message about an avatar entering chat range
-    EnteredChatRange {
-        /// the distance where the avatar entered chat range in meters
-        distance: Option<f64>,
+    /// a message about an avatar entering an area of significance
+    EnteredArea {
+        /// the area of significance
+        area: SecondLifeArea,
+        /// the distance where the avatar entered the area
+        distance: Option<SecondLifeDistance>,
     },
-    /// a message about an avatar leaving chat range
-    LeftChatRange,
-    /// a message about an avatar entering draw distance
-    EnteredDrawDistance {
-        /// the distance where the avatar entered draw distance in meters
-        distance: Option<f64>,
+    /// a message about an avatar leaving an area of significance
+    LeftArea {
+        /// the area of significance
+        area: SecondLifeArea,
     },
-    /// a message about an avatar leaving draw distance
-    LeftDrawDistance,
-    /// a message about an avatar entering the region
-    EnteredRegion {
-        /// the distance where the avatar entered the region in meters
-        distance: Option<f64>,
-    },
-    /// a message about an avatar leaving the region
-    LeftRegion,
+}
+
+/// parse a Second Life avatar message
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn avatar_message_parser() -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>> {
+    // TODO: implement properly
+    any()
+        .repeated()
+        .collect::<String>()
+        .try_map(|s, _span: std::ops::Range<usize>| {
+            Ok(SecondLifeAvatarMessage::Chat {
+                volume: SecondLifeChatVolume::Say,
+                message: s,
+            })
+        })
 }
 
 /// represents an event commemorated in the Second Life chat log
@@ -211,8 +507,8 @@ pub enum SecondLifeAvatarMessage {
 pub enum SecondLifeChatLogEvent {
     /// line about an avatar (or an object doing things indistinguishable from an avatar in the chat log)
     AvatarLine {
-        /// name of the avatar
-        username: String,
+        /// name of the avatar or object
+        name: String,
         /// message
         message: SecondLifeAvatarMessage,
     },
@@ -221,6 +517,38 @@ pub enum SecondLifeChatLogEvent {
         /// the system message
         message: SecondLifeSystemMessage,
     },
+}
+
+/// parse a second life avatar name as it appears in the chat log before a message
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn avatar_name_parser() -> impl Parser<char, String, Error = Simple<char>> {
+    none_of(":")
+        .repeated()
+        .collect::<String>()
+        .try_map(|s, _span: std::ops::Range<usize>| Ok(s))
+}
+
+/// parse a Second Life chat log event
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn chat_log_event_parser() -> impl Parser<char, SecondLifeChatLogEvent, Error = Simple<char>> {
+    just("Second Life: ")
+        .ignore_then(
+            system_message_parser().try_map(|message, _span: std::ops::Range<usize>| {
+                Ok(SecondLifeChatLogEvent::SystemMessage { message })
+            }),
+        )
+        .or(avatar_name_parser()
+            .then_ignore(just(":"))
+            .then(avatar_message_parser())
+            .try_map(|(name, message), _span: std::ops::Range<usize>| {
+                Ok(SecondLifeChatLogEvent::AvatarLine { name, message })
+            }))
 }
 
 /// represents a Second Life chat log line
@@ -232,10 +560,86 @@ pub struct SecondLifeChatLogLine {
     event: SecondLifeChatLogEvent,
 }
 
+/// parse a Second Life chat log line
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn sl_chat_log_line_parser() -> impl Parser<char, SecondLifeChatLogLine, Error = Simple<char>> {
+    just("[")
+        .ignore_then(
+            one_of("0123456789")
+                .repeated()
+                .exactly(4)
+                .collect::<String>(),
+        )
+        .then(
+            just("/").ignore_then(
+                one_of("0123456789")
+                    .repeated()
+                    .exactly(2)
+                    .collect::<String>(),
+            ),
+        )
+        .then(
+            just("/").ignore_then(
+                one_of("0123456789")
+                    .repeated()
+                    .exactly(2)
+                    .collect::<String>(),
+            ),
+        )
+        .then(
+            just(" ").ignore_then(
+                one_of("0123456789")
+                    .repeated()
+                    .exactly(2)
+                    .collect::<String>(),
+            ),
+        )
+        .then(
+            just(":").ignore_then(
+                one_of("0123456789")
+                    .repeated()
+                    .exactly(2)
+                    .collect::<String>(),
+            ),
+        )
+        .then(
+            just(":")
+                .ignore_then(
+                    one_of("0123456789")
+                        .repeated()
+                        .exactly(2)
+                        .collect::<String>(),
+                )
+                .or_not(),
+        )
+        .then_ignore(just("]  "))
+        .then(chat_log_event_parser())
+        .try_map(
+            |((((((year, month), day), hour), minute), second), event),
+             span: std::ops::Range<usize>| {
+                let second = second.unwrap_or("00".to_string());
+                let format = time::macros::format_description!(
+                    "[year]/[month]/[day] [hour]:[minute]:[second]"
+                );
+                Ok(SecondLifeChatLogLine {
+                    timestamp: time::PrimitiveDateTime::parse(
+                        &format!("{}/{}/{} {}:{}:{}", year, month, day, hour, minute, second),
+                        format,
+                    )
+                    .map_err(|e| Simple::custom(span, format!("{:?}", e)))?,
+                    event,
+                })
+            },
+        )
+}
+
 /// The main behaviour of the binary should go here
 #[instrument]
 async fn do_stuff() -> Result<(), crate::Error> {
-    let options = Options::parse();
+    let options = <Options as clap::Parser>::parse();
     tracing::debug!("{:#?}", options);
 
     let avatar_dir_name = options.avatar_name.replace(" ", "_").to_lowercase();
@@ -267,6 +671,8 @@ async fn do_stuff() -> Result<(), crate::Error> {
 
     while let Ok(Some(line)) = lines.next_line().await {
         println!("source: {}, line: {}", line.source().display(), line.line());
+        let parsed_line = sl_chat_log_line_parser().parse(line.line());
+        println!("parse result:\n{:#?}", parsed_line);
     }
 
     Ok(())
