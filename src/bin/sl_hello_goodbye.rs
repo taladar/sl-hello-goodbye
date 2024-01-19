@@ -445,6 +445,19 @@ pub enum SecondLifeChatVolume {
     RegionSay,
 }
 
+impl SecondLifeChatVolume {
+    /// identify the chat volume of a message and strip it off the message
+    pub fn volume_and_message(s: String) -> (SecondLifeChatVolume, String) {
+        if s.starts_with("whispers: ") {
+            (SecondLifeChatVolume::Whisper, s[10..].to_string())
+        } else if s.starts_with("shouts: ") {
+            (SecondLifeChatVolume::Shout, s[8..].to_string())
+        } else {
+            (SecondLifeChatVolume::Say, s)
+        }
+    }
+}
+
 /// represents a Second Life area of significance
 #[derive(Debug, Clone)]
 pub enum SecondLifeArea {
@@ -466,6 +479,13 @@ pub enum SecondLifeAvatarMessage {
         /// the chat message
         message: String,
     },
+    /// an emote (chat message starting with /me in the log)
+    Emote {
+        /// how "loud" the message was (whisper, say, shout or region say)
+        volume: SecondLifeChatVolume,
+        /// the chat message without the /me
+        message: String,
+    },
     /// a message about an avatar coming online
     CameOnline,
     /// a message about an avatar going offline
@@ -484,6 +504,43 @@ pub enum SecondLifeAvatarMessage {
     },
 }
 
+/// parse a Second Life avatar chat message
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn avatar_chat_message_parser() -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>>
+{
+    any()
+        .repeated()
+        .collect::<String>()
+        .try_map(|s, _span: std::ops::Range<usize>| {
+            let (v, s) = SecondLifeChatVolume::volume_and_message(s.to_string());
+            Ok(SecondLifeAvatarMessage::Chat {
+                volume: v,
+                message: s,
+            })
+        })
+}
+
+/// parse a Second Life avatar emote message
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn avatar_emote_message_parser() -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>>
+{
+    just("/me ")
+        .ignore_then(any().repeated().collect::<String>())
+        .try_map(|s, _span: std::ops::Range<usize>| {
+            let (v, s) = SecondLifeChatVolume::volume_and_message(s);
+            Ok(SecondLifeAvatarMessage::Emote {
+                volume: v,
+                message: s,
+            })
+        })
+}
+
 /// parse a Second Life avatar message
 ///
 /// # Errors
@@ -491,15 +548,7 @@ pub enum SecondLifeAvatarMessage {
 /// returns an error if the parser fails
 fn avatar_message_parser() -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>> {
     // TODO: implement properly
-    any()
-        .repeated()
-        .collect::<String>()
-        .try_map(|s, _span: std::ops::Range<usize>| {
-            Ok(SecondLifeAvatarMessage::Chat {
-                volume: SecondLifeChatVolume::Say,
-                message: s,
-            })
-        })
+    avatar_emote_message_parser().or(avatar_chat_message_parser())
 }
 
 /// represents an event commemorated in the Second Life chat log
@@ -516,6 +565,11 @@ pub enum SecondLifeChatLogEvent {
     SystemMessage {
         /// the system message
         message: SecondLifeSystemMessage,
+    },
+    /// a message without a colon, most likely an unnamed object like a translator, spanker, etc.
+    OtherMessage {
+        /// the message
+        message: String,
     },
 }
 
@@ -544,10 +598,16 @@ fn chat_log_event_parser() -> impl Parser<char, SecondLifeChatLogEvent, Error = 
             }),
         )
         .or(avatar_name_parser()
-            .then_ignore(just(":"))
+            .then_ignore(just(": "))
             .then(avatar_message_parser())
             .try_map(|(name, message), _span: std::ops::Range<usize>| {
                 Ok(SecondLifeChatLogEvent::AvatarLine { name, message })
+            }))
+        .or(any()
+            .repeated()
+            .collect::<String>()
+            .try_map(|s, _span: std::ops::Range<usize>| {
+                Ok(SecondLifeChatLogEvent::OtherMessage { message: s })
             }))
 }
 
