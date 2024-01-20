@@ -759,7 +759,14 @@ async fn do_stuff() -> Result<(), crate::Error> {
             }
             Ok(Ok(Some(line))) => {
                 last_line = Some(if let Some(ref ll) = last_line {
-                    format!("{}\n{}", ll, line.line())
+                    if line.line().starts_with(" ") || line.line() == "" {
+                        format!("{}\n{}", ll, line.line())
+                    } else {
+                        println!("parsing line:\n{}", ll);
+                        let parsed_line = sl_chat_log_line_parser().parse(ll.clone());
+                        println!("parse result:\n{:#?}", parsed_line);
+                        "".to_string()
+                    }
                 } else {
                     line.line().to_string()
                 });
