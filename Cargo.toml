@@ -36,7 +36,12 @@ ariadne = { version = "0.4.0", features = ["auto-color"] }
 chumsky = "0.9.3"
 
 [dev-dependencies]
+dotenvy = "0.15.7"
+envy = "0.4.2"
 pretty_assertions = { version = "1.3.0" }
+serde = { version = "1.0.195", features = ["derive"] }
+serde-aux = { version = "4.4.0", default-features = false }
+tracing-test = "0.2.4"
 
 [package.metadata.deb]
 name = "sl-hello-goodbye"

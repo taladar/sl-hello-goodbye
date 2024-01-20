@@ -31,6 +31,9 @@
 #![warn(clippy::expect_used)]
 #![doc = include_str!("../../README.md")]
 
+use std::path::PathBuf;
+
+use chumsky::text::whitespace;
 use tracing::instrument;
 use tracing_subscriber::{
     filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer, Registry,
@@ -614,8 +617,8 @@ fn chat_log_event_parser() -> impl Parser<char, SecondLifeChatLogEvent, Error = 
 /// represents a Second Life chat log line
 #[derive(Debug, Clone)]
 pub struct SecondLifeChatLogLine {
-    /// timestamp of the chat log line
-    timestamp: time::PrimitiveDateTime,
+    /// timestamp of the chat log line, some log lines do not have one because of bugs at the time they were written (e.g. some just have the time formatting string)
+    timestamp: Option<time::PrimitiveDateTime>,
     /// event that happened at that time
     event: SecondLifeChatLogEvent,
 }
@@ -675,25 +678,47 @@ fn sl_chat_log_line_parser() -> impl Parser<char, SecondLifeChatLogLine, Error =
                 )
                 .or_not(),
         )
-        .then_ignore(just("]  "))
-        .then(chat_log_event_parser())
+        .then_ignore(just("]"))
         .try_map(
-            |((((((year, month), day), hour), minute), second), event),
+            |(((((year, month), day), hour), minute), second),
              span: std::ops::Range<usize>| {
                 let second = second.unwrap_or("00".to_string());
                 let format = time::macros::format_description!(
                     "[year]/[month]/[day] [hour]:[minute]:[second]"
                 );
-                Ok(SecondLifeChatLogLine {
-                    timestamp: time::PrimitiveDateTime::parse(
+                Ok(Some(
+                    time::PrimitiveDateTime::parse(
                         &format!("{}/{}/{} {}:{}:{}", year, month, day, hour, minute, second),
                         format,
-                    )
-                    .map_err(|e| Simple::custom(span, format!("{:?}", e)))?,
+                    ).map_err(|e| Simple::custom(span, format!("{:?}", e)))?
+                ))
+             }
+        )
+        .or(just("[[year,datetime,slt]/[mthnum,datetime,slt]/[day,datetime,slt] [hour,datetime,slt]:[min,datetime,slt]]").map(|_| None))
+        .then_ignore(whitespace())
+        .then(chat_log_event_parser())
+        .try_map(
+            |(timestamp, event),
+             _span: std::ops::Range<usize>| {
+                Ok(SecondLifeChatLogLine {
+                    timestamp,
                     event,
                 })
             },
         )
+}
+
+/// determine avatar log dir from avatar name
+fn avatar_log_dir(avatar_name: &str) -> Result<PathBuf, crate::Error> {
+    let avatar_dir_name = avatar_name.replace(" ", "_").to_lowercase();
+    tracing::debug!("Avatar dir name: {}", avatar_dir_name);
+
+    let Some(home_dir) = dirs2::home_dir() else {
+        tracing::error!("Could not determine current user home directory");
+        return Err(crate::Error::HomeDirError);
+    };
+
+    Ok(home_dir.join(".firestorm/").join(avatar_dir_name))
 }
 
 /// The main behaviour of the binary should go here
@@ -702,15 +727,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
     let options = <Options as clap::Parser>::parse();
     tracing::debug!("{:#?}", options);
 
-    let avatar_dir_name = options.avatar_name.replace(" ", "_").to_lowercase();
-    tracing::debug!("Avatar dir name: {}", avatar_dir_name);
-
-    let Some(home_dir) = dirs2::home_dir() else {
-        tracing::error!("Could not determine current user home directory");
-        return Err(crate::Error::HomeDirError);
-    };
-
-    let avatar_dir = home_dir.join(".firestorm/").join(avatar_dir_name);
+    let avatar_dir = avatar_log_dir(&options.avatar_name)?;
 
     let local_chat_log_file = avatar_dir.join("chat.txt");
 
@@ -730,6 +747,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
         .map_err(crate::Error::MuxedLinesAddFileError)?;
 
     while let Ok(Some(line)) = lines.next_line().await {
+        // TODO: handle continuation lines (probably requires delaying parsing a bit)
         println!("source: {}, line: {}", line.source().display(), line.line());
         let parsed_line = sl_chat_log_line_parser().parse(line.line());
         println!("parse result:\n{:#?}", parsed_line);
@@ -785,6 +803,72 @@ async fn main() -> Result<(), Error> {
 
 #[cfg(test)]
 mod test {
-    //use super::*;
+    use std::io::{BufRead, BufReader};
+
+    use super::*;
     //use pretty_assertions::{assert_eq, assert_ne};
+
+    /// used to deserialize the required options from the environment
+    #[derive(Debug, serde::Deserialize)]
+    struct EnvOptions {
+        #[serde(
+            deserialize_with = "serde_aux::field_attributes::deserialize_vec_from_string_or_vec"
+        )]
+        test_avatar_names: Vec<String>,
+    }
+
+    /// Error enum for the application
+    #[derive(thiserror::Error, Debug)]
+    pub enum TestError {
+        /// error loading environment
+        #[error("error loading environment: {0}")]
+        EnvError(#[from] envy::Error),
+        /// error loading .env file
+        #[error("error loading .env file: {0}")]
+        DotEnvError(#[from] dotenvy::Error),
+        /// error opening chat log file
+        #[error("error opening chat log file {0}: {1}")]
+        OpenChatLogFileError(std::path::PathBuf, std::io::Error),
+        /// error reading chat log line from file
+        #[error("error reading chat log line from file: {0}")]
+        ChatLogLineReadError(std::io::Error),
+        /// application error
+        #[error(transparent)]
+        AppError(#[from] crate::Error),
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_log_line_parser() -> Result<(), TestError> {
+        dotenvy::dotenv()?;
+        let env_options = envy::from_env::<EnvOptions>()?;
+        for avatar_name in env_options.test_avatar_names {
+            let avatar_dir = avatar_log_dir(&avatar_name)?;
+            let local_chat_log_file = avatar_dir.join("chat.txt");
+            let file = std::fs::File::open(&local_chat_log_file)
+                .map_err(|e| TestError::OpenChatLogFileError(local_chat_log_file.clone(), e))?;
+            let file = BufReader::new(file);
+            let mut last_line: Option<String> = None;
+            for line in file.lines() {
+                let line = line.map_err(TestError::ChatLogLineReadError)?;
+                if line.starts_with(" ") || line == "" {
+                    if let Some(ll) = last_line {
+                        last_line = Some(format!("{}\n{}", ll, line));
+                        continue;
+                    }
+                }
+                if let Some(ref ll) = last_line {
+                    if let Err(e) = sl_chat_log_line_parser().parse(ll.clone()) {
+                        tracing::error!("failed to parse line\n{}", ll);
+                        for err in e {
+                            tracing::error!("{}", err);
+                        }
+                        panic!("Failed to parse a line");
+                    }
+                }
+                last_line = Some(line);
+            }
+        }
+        Ok(())
+    }
 }
