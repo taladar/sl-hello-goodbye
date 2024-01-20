@@ -1102,6 +1102,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
     let mut last_line: Option<String> = None;
 
     loop {
+        // TODO: this drops lines sometimes, presumably because timeout does not reuse the next_line() future from the last loop
         match tokio::time::timeout(std::time::Duration::from_millis(1), lines.next_line()).await {
             Err(tokio::time::error::Elapsed { .. }) => {
                 if let Some(ref ll) = last_line {
