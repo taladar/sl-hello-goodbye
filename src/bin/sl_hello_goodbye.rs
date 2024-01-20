@@ -1108,21 +1108,22 @@ async fn do_stuff() -> Result<(), crate::Error> {
                     println!("parsing line:\n{}", ll);
                     let parsed_line = sl_chat_log_line_parser().parse(ll.clone());
                     println!("parse result:\n{:#?}", parsed_line);
+                    last_line = None;
                 }
             }
             Ok(Ok(Some(line))) => {
-                last_line = Some(if let Some(ref ll) = last_line {
+                last_line = if let Some(ref ll) = last_line {
                     if line.line().starts_with(" ") || line.line() == "" {
-                        format!("{}\n{}", ll, line.line())
+                        Some(format!("{}\n{}", ll, line.line()))
                     } else {
                         println!("parsing line:\n{}", ll);
                         let parsed_line = sl_chat_log_line_parser().parse(ll.clone());
                         println!("parse result:\n{:#?}", parsed_line);
-                        "".to_string()
+                        None
                     }
                 } else {
-                    line.line().to_string()
-                });
+                    Some(line.line().to_string())
+                };
             }
             _ => {
                 break;
