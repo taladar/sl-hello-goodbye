@@ -263,7 +263,7 @@ pub struct SecondLifeAvatarKey(uuid::Uuid);
 pub fn uuid_parser() -> impl Parser<char, uuid::Uuid, Error = Simple<char>> {
     one_of("0123456789abcdef")
         .repeated()
-        .exactly(6)
+        .exactly(8)
         .collect::<String>()
         .then_ignore(just('-'))
         .then(
@@ -427,6 +427,13 @@ pub enum SecondLifeSystemMessage {
         /// the modified query
         query: String,
     },
+    /// message about different simulator version
+    SimulatorVersion {
+        /// the previous region simulator version
+        previous_region_simulator_version: String,
+        /// the current region simulator version
+        current_region_simulator_version: String,
+    },
     /// other system message
     OtherSystemMessage {
         /// the raw message
@@ -473,16 +480,15 @@ pub fn sent_payment_message_parser(
         .then(linden_amount_parser())
         .then(
             just(" for ")
-                .ignore_then(any().repeated().collect::<String>())
-                .or_not(),
+                .ignore_then(take_until(just(".")).map(|(n, _)| Some(n)))
+                .or(just(".").map(|_| None)),
         )
-        .then_ignore(just("."))
         .try_map(
             |((recipient_avatar_key, amount), object_name), _span: std::ops::Range<usize>| {
                 Ok(SecondLifeSystemMessage::SentPaymentMessage {
                     recipient_avatar_key,
                     amount,
-                    object_name,
+                    object_name: object_name.map(|n| n.into_iter().collect()),
                 })
             },
         )
@@ -501,15 +507,15 @@ pub fn received_payment_message_parser(
         .then(
             just(": ")
                 .ignore_then(any().repeated().collect::<String>())
-                .or_not(),
+                .ignore_then(take_until(just(".")).map(|(n, _)| Some(n)))
+                .or(just(".").map(|_| None)),
         )
-        .then_ignore(just("."))
         .try_map(
             |((sender_avatar_key, amount), message), _span: std::ops::Range<usize>| {
                 Ok(SecondLifeSystemMessage::ReceivedPaymentMessage {
                     sender_avatar_key,
                     amount,
-                    message,
+                    message: message.map(|n| n.into_iter().collect()),
                 })
             },
         )
@@ -563,35 +569,31 @@ pub fn region_restart_message_parser(
 /// returns an error if the string could not be parsed
 pub fn object_gave_object_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
-    any()
-        .repeated()
-        .collect::<String>()
-        .then_ignore(just(" owned by "))
+    take_until(just(" owned by "))
         .then(agent_url_as_avatar_key_parser())
         .then_ignore(
             whitespace()
                 .or_not()
                 .ignore_then(just("gave you ").then(just("<nolink>'").or_not())),
         )
-        .then(any().repeated().collect::<String>())
-        .then_ignore(
+        .then(take_until(
             just("</nolink>'")
                 .or_not()
                 .then(whitespace())
                 .then(just("( http://slurl.com/secondlife/")),
-        )
+        ))
         .then(location_parser())
         .then_ignore(just(" )."))
         .try_map(
             |(
-                ((giving_object_name, giving_object_owner), given_object_name),
+                (((giving_object_name, _), giving_object_owner), (given_object_name, _)),
                 giving_object_location,
             ),
              _span: std::ops::Range<usize>| {
                 Ok(SecondLifeSystemMessage::ObjectGaveObjectMessage {
-                    giving_object_name,
+                    giving_object_name: giving_object_name.into_iter().collect(),
                     giving_object_owner,
-                    given_object_name,
+                    given_object_name: given_object_name.into_iter().collect(),
                     giving_object_location,
                 })
             },
@@ -606,15 +608,13 @@ pub fn object_gave_object_message_parser(
 pub fn avatar_gave_object_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("A group member named ")
-        .ignore_then(any().repeated().collect::<String>())
-        .then_ignore(just(" gave you "))
-        .then(any().repeated().collect::<String>())
-        .then_ignore(just("."))
+        .ignore_then(take_until(just(" gave you ")))
+        .then(take_until(just(".")))
         .try_map(
-            |(giving_avatar_name, given_object_name), _span: std::ops::Range<usize>| {
+            |((giving_avatar_name, _), (given_object_name, _)), _span: std::ops::Range<usize>| {
                 Ok(SecondLifeSystemMessage::AvatarGaveObjectMessage {
-                    giving_avatar_name,
-                    given_object_name,
+                    giving_avatar_name: giving_avatar_name.into_iter().collect(),
+                    given_object_name: given_object_name.into_iter().collect(),
                 })
             },
         )
@@ -649,7 +649,43 @@ pub fn modified_search_query_message_parser(
         })
 }
 
+/// parse a system message about a different simulator version
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn simulator_version_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("The region you have entered is running a different simulator version.")
+        .ignore_then(whitespace())
+        .ignore_then(just("Current simulator:"))
+        .ignore_then(whitespace())
+        .ignore_then(take_until(just("\n")).map(|(s, _): (Vec<char>, _)| s.into_iter().collect()))
+        .then_ignore(whitespace())
+        .then_ignore(just("Previous simulator:"))
+        .then_ignore(whitespace())
+        .then(any().repeated().collect::<String>())
+        .try_map(
+            |(current_region_simulator_version, previous_region_simulator_version),
+             _span: std::ops::Range<usize>| {
+                Ok(SecondLifeSystemMessage::SimulatorVersion {
+                    previous_region_simulator_version,
+                    current_region_simulator_version,
+                })
+            },
+        )
+}
+
 /// parse a Second Life system message
+///
+/// TODO:
+/// You decline...
+/// Creating bridge...
+/// Bridge created...
+/// Script info...
+/// Unable to initiate teleport due to RLV restrictions
+/// ...is now known as...
+/// Gave you messages without nolink tags
 ///
 /// # Errors
 ///
@@ -661,12 +697,16 @@ pub fn system_message_parser() -> impl Parser<char, SecondLifeSystemMessage, Err
                 region_restart_message_parser().or(object_gave_object_message_parser().or(
                     items_successfully_shared_message_parser().or(
                         modified_search_query_message_parser().or(
-                            avatar_gave_object_message_parser().or(any()
-                                .repeated()
-                                .collect::<String>()
-                                .try_map(|s, _span: std::ops::Range<usize>| {
-                                    Ok(SecondLifeSystemMessage::OtherSystemMessage { message: s })
-                                })),
+                            avatar_gave_object_message_parser().or(
+                                simulator_version_message_parser().or(any()
+                                    .repeated()
+                                    .collect::<String>()
+                                    .try_map(|s, _span: std::ops::Range<usize>| {
+                                        Ok(SecondLifeSystemMessage::OtherSystemMessage {
+                                            message: s,
+                                        })
+                                    })),
+                            ),
                         ),
                     ),
                 )),
