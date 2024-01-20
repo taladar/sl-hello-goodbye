@@ -221,7 +221,10 @@ pub struct SecondLifeRegionName(String);
 ///
 /// returns an error if the string could not be parsed
 pub fn region_name_parser() -> impl Parser<char, SecondLifeRegionName, Error = Simple<char>> {
-    text::ident().map(SecondLifeRegionName)
+    text::ident()
+        .separated_by(just("%20"))
+        .collect::<Vec<String>>()
+        .map(|components| SecondLifeRegionName(components.join(" ")))
 }
 
 /// represents a Second Life Location
@@ -309,7 +312,7 @@ pub fn agent_url_as_avatar_key_parser(
 ) -> impl Parser<char, SecondLifeAvatarKey, Error = Simple<char>> {
     just("secondlife:///app/agent/")
         .ignore_then(uuid_parser())
-        .then_ignore(just("/about"))
+        .then_ignore(just("/about").or(just("/inspect")))
         .map(|uuid| SecondLifeAvatarKey(uuid))
 }
 
@@ -375,6 +378,8 @@ pub enum SecondLifeSystemMessage {
         recipient_avatar_key: SecondLifeAvatarKey,
         /// the amount paid
         amount: SecondLifeLindenAmount,
+        /// when buying an object the name of the object
+        object_name: Option<String>,
     },
     /// message about a received payment
     ReceivedPaymentMessage {
@@ -382,6 +387,8 @@ pub enum SecondLifeSystemMessage {
         sender_avatar_key: SecondLifeAvatarKey,
         /// the amount received
         amount: SecondLifeLindenAmount,
+        /// an optional message
+        message: Option<String>,
     },
     /// message about a song playing on stream
     NowPlayingMessage {
@@ -413,11 +420,233 @@ pub enum SecondLifeSystemMessage {
         /// the name of the given object
         given_object_name: String,
     },
+    /// message about successfully shared items
+    ItemsSuccessfullyShared,
+    /// message about a modified search query
+    ModifiedSearchQuery {
+        /// the modified query
+        query: String,
+    },
     /// other system message
     OtherSystemMessage {
         /// the raw message
         message: String,
     },
+}
+
+/// parse a system message about a saved snapshot
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn snapshot_saved_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("Snapshot saved: ")
+        .ignore_then(any().repeated().collect::<String>().map(PathBuf::from))
+        .try_map(|filename, _span: std::ops::Range<usize>| {
+            Ok(SecondLifeSystemMessage::SavedSnapshotMessage { filename })
+        })
+}
+
+/// parse a system message about a saved attachment
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn attachment_saved_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("Attachment has been saved").try_map(|_, _span: std::ops::Range<usize>| {
+        Ok(SecondLifeSystemMessage::AttachmentSavedMessage)
+    })
+}
+
+/// parse a system message about a sent payment
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn sent_payment_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("You paid ")
+        .ignore_then(agent_url_as_avatar_key_parser())
+        .then_ignore(just(" "))
+        .then(linden_amount_parser())
+        .then(
+            just(" for ")
+                .ignore_then(any().repeated().collect::<String>())
+                .or_not(),
+        )
+        .then_ignore(just("."))
+        .try_map(
+            |((recipient_avatar_key, amount), object_name), _span: std::ops::Range<usize>| {
+                Ok(SecondLifeSystemMessage::SentPaymentMessage {
+                    recipient_avatar_key,
+                    amount,
+                    object_name,
+                })
+            },
+        )
+}
+
+/// parse a system message about a received payment
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn received_payment_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    agent_url_as_avatar_key_parser()
+        .then_ignore(just(" paid you "))
+        .then(linden_amount_parser())
+        .then(
+            just(": ")
+                .ignore_then(any().repeated().collect::<String>())
+                .or_not(),
+        )
+        .then_ignore(just("."))
+        .try_map(
+            |((sender_avatar_key, amount), message), _span: std::ops::Range<usize>| {
+                Ok(SecondLifeSystemMessage::ReceivedPaymentMessage {
+                    sender_avatar_key,
+                    amount,
+                    message,
+                })
+            },
+        )
+}
+
+/// parse a system message about a completed teleport
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn teleport_completed_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("Teleport completed from http://maps.secondlife.com/secondlife/")
+        .ignore_then(location_parser())
+        .try_map(|origin, _span: std::ops::Range<usize>| {
+            Ok(SecondLifeSystemMessage::TeleportCompletedMessage { origin })
+        })
+}
+
+/// parse a system message about a now playing song
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn now_playing_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("Now playing: ")
+        .ignore_then(any().repeated().collect::<String>())
+        .try_map(|song_name, _span: std::ops::Range<usize>| {
+            Ok(SecondLifeSystemMessage::NowPlayingMessage { song_name })
+        })
+}
+
+/// parse a system message about a region restart
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn region_restart_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("The region you are in now is about to restart. If you stay in this region you will be logged out.")
+        .try_map(|_, _span: std::ops::Range<usize>| {
+            Ok(SecondLifeSystemMessage::RegionRestartMessage)
+        })
+}
+
+/// parse a system message about an object giving the current avatar an object
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn object_gave_object_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    any()
+        .repeated()
+        .collect::<String>()
+        .then_ignore(just(" owned by "))
+        .then(agent_url_as_avatar_key_parser())
+        .then_ignore(
+            whitespace()
+                .or_not()
+                .ignore_then(just("gave you ").then(just("<nolink>'").or_not())),
+        )
+        .then(any().repeated().collect::<String>())
+        .then_ignore(
+            just("</nolink>'")
+                .or_not()
+                .then(whitespace())
+                .then(just("( http://slurl.com/secondlife/")),
+        )
+        .then(location_parser())
+        .then_ignore(just(" )."))
+        .try_map(
+            |(
+                ((giving_object_name, giving_object_owner), given_object_name),
+                giving_object_location,
+            ),
+             _span: std::ops::Range<usize>| {
+                Ok(SecondLifeSystemMessage::ObjectGaveObjectMessage {
+                    giving_object_name,
+                    giving_object_owner,
+                    given_object_name,
+                    giving_object_location,
+                })
+            },
+        )
+}
+
+/// parse a system message about an avatar giving the current avatar an object
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn avatar_gave_object_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("A group member named ")
+        .ignore_then(any().repeated().collect::<String>())
+        .then_ignore(just(" gave you "))
+        .then(any().repeated().collect::<String>())
+        .then_ignore(just("."))
+        .try_map(
+            |(giving_avatar_name, given_object_name), _span: std::ops::Range<usize>| {
+                Ok(SecondLifeSystemMessage::AvatarGaveObjectMessage {
+                    giving_avatar_name,
+                    given_object_name,
+                })
+            },
+        )
+}
+
+/// parse a system message about items being successfully shared
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn items_successfully_shared_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("Items successfully shared.").try_map(|_, _span: std::ops::Range<usize>| {
+        Ok(SecondLifeSystemMessage::ItemsSuccessfullyShared)
+    })
+}
+
+/// parse a system message about a modified search query
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn modified_search_query_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    just("Your search query was modified and the words that were too short were removed.")
+        .ignore_then(whitespace())
+        .ignore_then(just("Searched for:"))
+        .ignore_then(whitespace())
+        .ignore_then(any().repeated().collect::<String>())
+        .try_map(|query, _span: std::ops::Range<usize>| {
+            Ok(SecondLifeSystemMessage::ModifiedSearchQuery { query })
+        })
 }
 
 /// parse a Second Life system message
@@ -426,13 +655,24 @@ pub enum SecondLifeSystemMessage {
 ///
 /// returns an error if the string could not be parsed
 pub fn system_message_parser() -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
-    // TODO: implement properly
-    any()
-        .repeated()
-        .collect::<String>()
-        .try_map(|s, _span: std::ops::Range<usize>| {
-            Ok(SecondLifeSystemMessage::OtherSystemMessage { message: s })
-        })
+    snapshot_saved_message_parser().or(attachment_saved_message_parser().or(
+        sent_payment_message_parser().or(received_payment_message_parser().or(
+            teleport_completed_message_parser().or(now_playing_message_parser().or(
+                region_restart_message_parser().or(object_gave_object_message_parser().or(
+                    items_successfully_shared_message_parser().or(
+                        modified_search_query_message_parser().or(
+                            avatar_gave_object_message_parser().or(any()
+                                .repeated()
+                                .collect::<String>()
+                                .try_map(|s, _span: std::ops::Range<usize>| {
+                                    Ok(SecondLifeSystemMessage::OtherSystemMessage { message: s })
+                                })),
+                        ),
+                    ),
+                )),
+            )),
+        )),
+    ))
 }
 
 /// represents a Second Life chat volume
@@ -470,6 +710,21 @@ pub enum SecondLifeArea {
     DrawDistance,
     /// region
     Region,
+}
+
+/// parse an area of significance
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn area_of_significance_parser() -> impl Parser<char, SecondLifeArea, Error = Simple<char>> {
+    just("chat range")
+        .to(SecondLifeArea::ChatRange)
+        .or(just("draw distance").to(SecondLifeArea::DrawDistance))
+        .or(just("the ")
+            .or_not()
+            .ignore_then(just("region"))
+            .to(SecondLifeArea::Region))
 }
 
 /// represents a Second Life avatar related message
@@ -544,14 +799,72 @@ fn avatar_emote_message_parser() -> impl Parser<char, SecondLifeAvatarMessage, E
         })
 }
 
+/// parse a message about an avatar coming online
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn avatar_came_online_message_parser(
+) -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>> {
+    just("is online.").map(|_| SecondLifeAvatarMessage::CameOnline)
+}
+
+/// parse a message about an avatar going offline
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn avatar_went_offline_message_parser(
+) -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>> {
+    just("is offline.").map(|_| SecondLifeAvatarMessage::WentOffline)
+}
+
+/// parse a message about an avatar entering an area of significance
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn avatar_entered_area_message_parser(
+) -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>> {
+    just("entered ")
+        .ignore_then(area_of_significance_parser())
+        .then(
+            just(" (")
+                .ignore_then(distance_parser())
+                .then_ignore(just(")"))
+                .or_not(),
+        )
+        .then_ignore(just("."))
+        .try_map(|(area, distance), _span: std::ops::Range<usize>| {
+            Ok(SecondLifeAvatarMessage::EnteredArea { area, distance })
+        })
+}
+
+/// parse a message about an avatar leaving an area of significance
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn avatar_left_area_message_parser(
+) -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>> {
+    just("left ")
+        .ignore_then(area_of_significance_parser())
+        .then_ignore(just("."))
+        .try_map(|area, _span: std::ops::Range<usize>| {
+            Ok(SecondLifeAvatarMessage::LeftArea { area })
+        })
+}
+
 /// parse a Second Life avatar message
 ///
 /// # Errors
 ///
 /// returns an error if the parser fails
 fn avatar_message_parser() -> impl Parser<char, SecondLifeAvatarMessage, Error = Simple<char>> {
-    // TODO: implement properly
-    avatar_emote_message_parser().or(avatar_chat_message_parser())
+    avatar_came_online_message_parser().or(avatar_went_offline_message_parser().or(
+        avatar_entered_area_message_parser().or(avatar_left_area_message_parser()
+            .or(avatar_emote_message_parser().or(avatar_chat_message_parser()))),
+    ))
 }
 
 /// represents an event commemorated in the Second Life chat log
@@ -601,7 +914,7 @@ fn chat_log_event_parser() -> impl Parser<char, SecondLifeChatLogEvent, Error = 
             }),
         )
         .or(avatar_name_parser()
-            .then_ignore(just(": "))
+            .then_ignore(just(":").then(whitespace()))
             .then(avatar_message_parser())
             .try_map(|(name, message), _span: std::ops::Range<usize>| {
                 Ok(SecondLifeChatLogEvent::AvatarLine { name, message })
@@ -882,17 +1195,42 @@ mod test {
                     }
                 }
                 if let Some(ref ll) = last_line {
-                    if let Err(e) = sl_chat_log_line_parser().parse(ll.clone()) {
-                        tracing::error!("failed to parse line\n{}", ll);
-                        for err in e {
-                            tracing::error!("{}", err);
+                    match sl_chat_log_line_parser().parse(ll.clone()) {
+                        Err(e) => {
+                            tracing::error!("failed to parse line\n{}", ll);
+                            for err in e {
+                                tracing::error!("{}", err);
+                            }
+                            panic!("Failed to parse a line");
                         }
-                        panic!("Failed to parse a line");
+                        Ok(parsed_line) => {
+                            if let SecondLifeChatLogLine {
+                                timestamp: _,
+                                event:
+                                    SecondLifeChatLogEvent::SystemMessage {
+                                        message:
+                                            SecondLifeSystemMessage::OtherSystemMessage { ref message },
+                                    },
+                            } = parsed_line
+                            {
+                                tracing::info!("parsed line\n{}\n{:?}", ll, parsed_line);
+                                if message.contains("owned by") && message.contains("gave you") {
+                                    if let Err(e) = object_gave_object_message_parser()
+                                        .parse(message.to_string())
+                                    {
+                                        for e in e {
+                                            tracing::debug!("Attempt to parse as object gave object line returned error:\n{}\n{:#?}", e, e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 last_line = Some(line);
             }
         }
-        Ok(())
+        panic!();
+        //Ok(())
     }
 }
