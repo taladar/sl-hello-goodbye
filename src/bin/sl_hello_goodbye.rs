@@ -746,11 +746,28 @@ async fn do_stuff() -> Result<(), crate::Error> {
         .await
         .map_err(crate::Error::MuxedLinesAddFileError)?;
 
-    while let Ok(Some(line)) = lines.next_line().await {
-        // TODO: handle continuation lines (probably requires delaying parsing a bit)
-        println!("source: {}, line: {}", line.source().display(), line.line());
-        let parsed_line = sl_chat_log_line_parser().parse(line.line());
-        println!("parse result:\n{:#?}", parsed_line);
+    let mut last_line: Option<String> = None;
+
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_millis(1), lines.next_line()).await {
+            Err(tokio::time::error::Elapsed { .. }) => {
+                if let Some(ref ll) = last_line {
+                    println!("parsing line:\n{}", ll);
+                    let parsed_line = sl_chat_log_line_parser().parse(ll.clone());
+                    println!("parse result:\n{:#?}", parsed_line);
+                }
+            }
+            Ok(Ok(Some(line))) => {
+                last_line = Some(if let Some(ref ll) = last_line {
+                    format!("{}\n{}", ll, line.line())
+                } else {
+                    line.line().to_string()
+                });
+            }
+            _ => {
+                break;
+            }
+        }
     }
 
     Ok(())
