@@ -69,6 +69,9 @@ pub enum Error {
     /// error parsing chat log line
     #[error("error parsing chat log line: {0}")]
     ChatLogLineParseError(ChumskyError),
+    /// error joining the log reader task before shutdown
+    #[error("error joining the log reader task before shutdown: {0}")]
+    JoinError(#[from] tokio::task::JoinError),
 }
 
 /// The Clap type for all the commandline parameters
@@ -1101,9 +1104,18 @@ async fn do_stuff() -> Result<(), crate::Error> {
 
     let mut last_line: Option<String> = None;
 
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+
+    let join_handle = tokio::spawn(async move {
+        while let Ok(Some(line)) = lines.next_line().await {
+            if let Err(e) = tx.send(line).await {
+                tracing::error!("Error sending line: {:?}", e);
+            }
+        }
+    });
+
     loop {
-        // TODO: this drops lines sometimes, presumably because timeout does not reuse the next_line() future from the last loop
-        match tokio::time::timeout(std::time::Duration::from_millis(1), lines.next_line()).await {
+        match tokio::time::timeout(std::time::Duration::from_millis(1), rx.recv()).await {
             Err(tokio::time::error::Elapsed { .. }) => {
                 if let Some(ref ll) = last_line {
                     println!("parsing line:\n{}", ll);
@@ -1112,7 +1124,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                     last_line = None;
                 }
             }
-            Ok(Ok(Some(line))) => {
+            Ok(Some(line)) => {
                 last_line = if let Some(ref ll) = last_line {
                     if line.line().starts_with(" ") || line.line() == "" {
                         Some(format!("{}\n{}", ll, line.line()))
@@ -1120,7 +1132,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                         println!("parsing line:\n{}", ll);
                         let parsed_line = sl_chat_log_line_parser().parse(ll.clone());
                         println!("parse result:\n{:#?}", parsed_line);
-                        None
+                        Some(line.line().to_string())
                     }
                 } else {
                     Some(line.line().to_string())
@@ -1131,6 +1143,8 @@ async fn do_stuff() -> Result<(), crate::Error> {
             }
         }
     }
+
+    join_handle.await?;
 
     Ok(())
 }
