@@ -31,6 +31,7 @@
 #![warn(clippy::expect_used)]
 #![doc = include_str!("../../README.md")]
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chumsky::text::whitespace;
@@ -1101,6 +1102,34 @@ fn avatar_log_dir(avatar_name: &str) -> Result<PathBuf, crate::Error> {
     Ok(home_dir.join(".firestorm/").join(avatar_dir_name))
 }
 
+/// parse a chat line as a welcome greeting and return the names of the greeted people
+///
+/// # Errors
+///
+/// returns an error if the parser fails
+fn welcome_greeting_parser() -> impl Parser<char, Vec<String>, Error = Simple<char>> {
+    just("Hi")
+        .or(just("Hello"))
+        .or(just("Hallo"))
+        .or(just("Ahoy"))
+        .ignore_then(whitespace())
+        .ignore_then(
+            take_until(
+                just(",")
+                    .or(just("and"))
+                    .or(just("und"))
+                    .or(just("\n").or(end().map(|_| "")))
+                    .rewind(),
+            )
+            .separated_by(just(",").or(just("and")).or(just("und")).or(just("\n"))),
+        )
+        .try_map(|s, _span: std::ops::Range<usize>| {
+            Ok(s.into_iter()
+                .map(|(s, _)| s.into_iter().collect::<String>().trim().to_string())
+                .collect())
+        })
+}
+
 /// The main behaviour of the binary should go here
 #[instrument]
 async fn do_stuff() -> Result<(), crate::Error> {
@@ -1138,37 +1167,109 @@ async fn do_stuff() -> Result<(), crate::Error> {
         }
     });
 
-    loop {
-        match tokio::time::timeout(std::time::Duration::from_millis(1), rx.recv()).await {
-            Err(tokio::time::error::Elapsed { .. }) => {
-                if let Some(ref ll) = last_line {
-                    println!("parsing line:\n{}", ll);
-                    let parsed_line = sl_chat_log_line_parser().parse(ll.clone());
-                    println!("parse result:\n{:#?}", parsed_line);
-                    last_line = None;
+    let (tx2, mut rx2) = tokio::sync::mpsc::channel(16);
+
+    let join_handle2 = tokio::spawn(async move {
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_millis(1), rx.recv()).await {
+                Err(tokio::time::error::Elapsed { .. }) => {
+                    if let Some(ref ll) = last_line {
+                        if let Err(e) = tx2.send(ll.clone()).await {
+                            tracing::error!("Error sending line (tx2): {:?}", e);
+                        }
+                        last_line = None;
+                    }
+                }
+                Ok(Some(line)) => {
+                    last_line = if let Some(ref ll) = last_line {
+                        if line.line().starts_with(" ") || line.line() == "" {
+                            Some(format!("{}\n{}", ll, line.line()))
+                        } else {
+                            if let Err(e) = tx2.send(ll.clone()).await {
+                                tracing::error!("Error sending line (tx2): {:?}", e);
+                            }
+                            Some(line.line().to_string())
+                        }
+                    } else {
+                        Some(line.line().to_string())
+                    };
+                }
+                _ => {
+                    break;
                 }
             }
-            Ok(Some(line)) => {
-                last_line = if let Some(ref ll) = last_line {
-                    if line.line().starts_with(" ") || line.line() == "" {
-                        Some(format!("{}\n{}", ll, line.line()))
-                    } else {
-                        println!("parsing line:\n{}", ll);
-                        let parsed_line = sl_chat_log_line_parser().parse(ll.clone());
-                        println!("parse result:\n{:#?}", parsed_line);
-                        Some(line.line().to_string())
-                    }
-                } else {
-                    Some(line.line().to_string())
-                };
+        }
+    });
+
+    let mut notify_handles: BTreeMap<String, notify_rust::NotificationHandle> = BTreeMap::new();
+
+    while let Some(line) = rx2.recv().await {
+        println!("parsing line:\n{}", line);
+        let parsed_line = sl_chat_log_line_parser().parse(line.clone());
+        println!("parse result:\n{:#?}", parsed_line);
+
+        if let Ok(SecondLifeChatLogLine {
+            timestamp: _,
+            event:
+                SecondLifeChatLogEvent::AvatarLine {
+                    ref name,
+                    message:
+                        SecondLifeAvatarMessage::EnteredArea {
+                            area: SecondLifeArea::ChatRange,
+                            distance: _,
+                        },
+                },
+        }) = parsed_line
+        {
+            match notify_rust::Notification::new()
+                .appname("sl-hello-goodbye")
+                .summary("New person entered chat range")
+                .body(&format!("{} entered the chat range", name))
+                .hint(notify_rust::Hint::Resident(true))
+                .timeout(notify_rust::Timeout::Never)
+                .show()
+            {
+                Ok(notify_handle) => {
+                    notify_handles.insert(name.to_string(), notify_handle);
+                }
+                Err(e) => {
+                    tracing::error!("Error sending notification: {:?}", e);
+                }
             }
-            _ => {
-                break;
+        }
+
+        if let Ok(SecondLifeChatLogLine {
+            timestamp: _,
+            event:
+                SecondLifeChatLogEvent::AvatarLine {
+                    name,
+                    message: SecondLifeAvatarMessage::Chat { message, volume: _ },
+                },
+        }) = parsed_line
+        {
+            if name == options.avatar_name {
+                if let Ok(greeted) = welcome_greeting_parser().parse(message.clone()) {
+                    tracing::debug!("Found welcoming greeting greeting\n{:#?}", greeted);
+                    for greeted in greeted {
+                        let mut to_remove = Vec::new();
+                        for name in notify_handles.keys() {
+                            if name.contains(&greeted) {
+                                to_remove.push(name.to_string());
+                            }
+                        }
+                        for name in to_remove {
+                            if let Some(notify_handle) = notify_handles.remove(&name) {
+                                notify_handle.close();
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     join_handle.await?;
+    join_handle2.await?;
 
     Ok(())
 }
@@ -1223,7 +1324,7 @@ mod test {
     use std::io::{BufRead, BufReader};
 
     use super::*;
-    //use pretty_assertions::{assert_eq, assert_ne};
+    use pretty_assertions::assert_eq;
 
     /// used to deserialize the required options from the environment
     #[derive(Debug, serde::Deserialize)]
@@ -1312,5 +1413,56 @@ mod test {
         }
         panic!();
         //Ok(())
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_welcome_greeting_parser_one_avatar() -> Result<(), TestError> {
+        match welcome_greeting_parser().parse("Hello John") {
+            Ok(parsed) => {
+                assert_eq!(parsed, ["John"]);
+            }
+            Err(e) => {
+                for err in e {
+                    tracing::error!("{}", err);
+                }
+                panic!("Failed to parse a line");
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_welcome_greeting_parser_two_avatars() -> Result<(), TestError> {
+        match welcome_greeting_parser().parse("Hello John and Paul") {
+            Ok(parsed) => {
+                assert_eq!(parsed, ["John", "Paul"]);
+            }
+            Err(e) => {
+                for err in e {
+                    tracing::error!("{}", err);
+                }
+                panic!("Failed to parse a line");
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_welcome_greeting_parser_three_avatars() -> Result<(), TestError> {
+        match welcome_greeting_parser().parse("Hello John, Paul and Mary") {
+            Ok(parsed) => {
+                assert_eq!(parsed, ["John", "Paul", "Mary"]);
+            }
+            Err(e) => {
+                for err in e {
+                    tracing::error!("{}", err);
+                }
+                panic!("Failed to parse a line");
+            }
+        }
+        Ok(())
     }
 }
