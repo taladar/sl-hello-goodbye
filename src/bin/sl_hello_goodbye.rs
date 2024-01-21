@@ -437,6 +437,13 @@ pub enum SecondLifeSystemMessage {
         /// the current region simulator version
         current_region_simulator_version: String,
     },
+    /// message about a renamed avatar
+    RenamedAvatar {
+        /// the old name
+        old_name: String,
+        /// the new name
+        new_name: String,
+    },
     /// other system message
     OtherSystemMessage {
         /// the raw message
@@ -679,6 +686,22 @@ pub fn simulator_version_message_parser(
         )
 }
 
+/// parse a system message about a renamed avatar
+///
+/// # Errors
+///
+/// returns an error if the string could not be parsed
+pub fn renamed_avatar_message_parser(
+) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
+    take_until(just(" is now known as"))
+        .map(|(s, _)| s.into_iter().collect())
+        .then_ignore(whitespace())
+        .then(take_until(just(".")).map(|(s, _): (Vec<char>, _)| s.into_iter().collect()))
+        .try_map(|(old_name, new_name), _span: std::ops::Range<usize>| {
+            Ok(SecondLifeSystemMessage::RenamedAvatar { old_name, new_name })
+        })
+}
+
 /// parse a Second Life system message
 ///
 /// TODO:
@@ -687,7 +710,6 @@ pub fn simulator_version_message_parser(
 /// Bridge created...
 /// Script info...
 /// Unable to initiate teleport due to RLV restrictions
-/// ...is now known as...
 /// Gave you messages without nolink tags
 ///
 /// # Errors
@@ -701,14 +723,16 @@ pub fn system_message_parser() -> impl Parser<char, SecondLifeSystemMessage, Err
                     items_successfully_shared_message_parser().or(
                         modified_search_query_message_parser().or(
                             avatar_gave_object_message_parser().or(
-                                simulator_version_message_parser().or(any()
-                                    .repeated()
-                                    .collect::<String>()
-                                    .try_map(|s, _span: std::ops::Range<usize>| {
-                                        Ok(SecondLifeSystemMessage::OtherSystemMessage {
-                                            message: s,
-                                        })
-                                    })),
+                                simulator_version_message_parser().or(
+                                    renamed_avatar_message_parser().or(any()
+                                        .repeated()
+                                        .collect::<String>()
+                                        .try_map(|s, _span: std::ops::Range<usize>| {
+                                            Ok(SecondLifeSystemMessage::OtherSystemMessage {
+                                                message: s,
+                                            })
+                                        })),
+                                ),
                             ),
                         ),
                     ),
