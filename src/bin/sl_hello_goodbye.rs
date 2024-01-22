@@ -1238,6 +1238,13 @@ async fn do_stuff() -> Result<(), crate::Error> {
             }
         }
 
+        // TODO:
+        // remove the notification when the person leaves the chat range
+        // case-insensitive name matching
+        // case-insensitive greetings
+        // wb or welcome back as greeting
+        // leave announcements and left chat range
+
         if let Ok(SecondLifeChatLogLine {
             timestamp: _,
             event:
