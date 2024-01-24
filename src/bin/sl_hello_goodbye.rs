@@ -1108,10 +1108,12 @@ fn avatar_log_dir(avatar_name: &str) -> Result<PathBuf, crate::Error> {
 ///
 /// returns an error if the parser fails
 fn welcome_greeting_parser() -> impl Parser<char, Vec<String>, Error = Simple<char>> {
-    just("Hi")
-        .or(just("Hello"))
-        .or(just("Hallo"))
-        .or(just("Ahoy"))
+    just("hi")
+        .or(just("hello"))
+        .or(just("hallo"))
+        .or(just("ahoy"))
+        .or(just("wb"))
+        .or(just("welcome back"))
         .ignore_then(whitespace())
         .ignore_then(
             take_until(
@@ -1230,7 +1232,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                 .show()
             {
                 Ok(notify_handle) => {
-                    notify_handles.insert(name.to_string(), notify_handle);
+                    notify_handles.insert(name.to_string().to_lowercase(), notify_handle);
                 }
                 Err(e) => {
                     tracing::error!("Error sending notification: {:?}", e);
@@ -1238,11 +1240,32 @@ async fn do_stuff() -> Result<(), crate::Error> {
             }
         }
 
+        if let Ok(SecondLifeChatLogLine {
+            timestamp: _,
+            event:
+                SecondLifeChatLogEvent::AvatarLine {
+                    ref name,
+                    message:
+                        SecondLifeAvatarMessage::LeftArea {
+                            area: SecondLifeArea::ChatRange,
+                        },
+                },
+        }) = parsed_line
+        {
+            let mut to_remove = Vec::new();
+            for n in notify_handles.keys() {
+                if n == name {
+                    to_remove.push(name.to_string());
+                }
+            }
+            for name in to_remove {
+                if let Some(notify_handle) = notify_handles.remove(&name) {
+                    notify_handle.close();
+                }
+            }
+        }
+
         // TODO:
-        // remove the notification when the person leaves the chat range
-        // case-insensitive name matching
-        // case-insensitive greetings
-        // wb or welcome back as greeting
         // leave announcements and left chat range
 
         if let Ok(SecondLifeChatLogLine {
@@ -1255,9 +1278,11 @@ async fn do_stuff() -> Result<(), crate::Error> {
         }) = parsed_line
         {
             if name == options.avatar_name {
-                if let Ok(greeted) = welcome_greeting_parser().parse(message.clone()) {
+                if let Ok(greeted) = welcome_greeting_parser().parse(message.clone().to_lowercase())
+                {
                     tracing::debug!("Found welcoming greeting greeting\n{:#?}", greeted);
                     for greeted in greeted {
+                        let greeted = greeted.to_lowercase();
                         let mut to_remove = Vec::new();
                         for name in notify_handles.keys() {
                             if name.contains(&greeted) {
