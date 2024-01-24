@@ -1252,9 +1252,10 @@ async fn do_stuff() -> Result<(), crate::Error> {
                 },
         }) = parsed_line
         {
+            let name = name.to_lowercase();
             let mut to_remove = Vec::new();
             for n in notify_handles.keys() {
-                if n == name {
+                if *n == name {
                     to_remove.push(name.to_string());
                 }
             }
