@@ -1451,9 +1451,9 @@ mod test {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_welcome_greeting_parser_one_avatar() -> Result<(), TestError> {
-        match welcome_greeting_parser().parse("Hello John") {
+        match welcome_greeting_parser().parse("hello john") {
             Ok(parsed) => {
-                assert_eq!(parsed, ["John"]);
+                assert_eq!(parsed, ["john"]);
             }
             Err(e) => {
                 for err in e {
@@ -1468,9 +1468,9 @@ mod test {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_welcome_greeting_parser_two_avatars() -> Result<(), TestError> {
-        match welcome_greeting_parser().parse("Hello John and Paul") {
+        match welcome_greeting_parser().parse("hello john and paul") {
             Ok(parsed) => {
-                assert_eq!(parsed, ["John", "Paul"]);
+                assert_eq!(parsed, ["john", "paul"]);
             }
             Err(e) => {
                 for err in e {
@@ -1485,9 +1485,9 @@ mod test {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_welcome_greeting_parser_three_avatars() -> Result<(), TestError> {
-        match welcome_greeting_parser().parse("Hello John, Paul and Mary") {
+        match welcome_greeting_parser().parse("hello john, paul and mary") {
             Ok(parsed) => {
-                assert_eq!(parsed, ["John", "Paul", "Mary"]);
+                assert_eq!(parsed, ["john", "paul", "mary"]);
             }
             Err(e) => {
                 for err in e {
