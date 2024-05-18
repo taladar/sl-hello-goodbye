@@ -166,7 +166,10 @@ impl std::fmt::Display for ChumskyError {
                 .finish()
                 .write(Source::from(&self.source), &mut s)
                 .map_err(|_| <std::fmt::Error as std::default::Default>::default())?;
-            let s = std::str::from_utf8(&s).expect("Expected ariadne to generate valid UTF-8");
+            let Ok(s) = std::str::from_utf8(&s) else {
+                tracing::error!("Expected ariadne to produce valid UTF-8");
+                return Err(std::fmt::Error);
+            };
             write!(f, "{}", s)?;
         }
         Ok(())
@@ -195,6 +198,7 @@ pub struct SecondLifeRegionCoordinates {
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn slash_separated_coordinate_parser(
 ) -> impl Parser<char, SecondLifeRegionCoordinates, Error = Simple<char>> {
     digits(10)
@@ -224,6 +228,7 @@ pub struct SecondLifeRegionName(String);
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn region_name_parser() -> impl Parser<char, SecondLifeRegionName, Error = Simple<char>> {
     text::ident()
         .separated_by(just("%20"))
@@ -245,6 +250,7 @@ pub struct SecondLifeLocation {
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn location_parser() -> impl Parser<char, SecondLifeLocation, Error = Simple<char>> {
     region_name_parser()
         .then_ignore(just('/'))
@@ -264,6 +270,7 @@ pub struct SecondLifeAvatarKey(uuid::Uuid);
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn uuid_parser() -> impl Parser<char, uuid::Uuid, Error = Simple<char>> {
     one_of("0123456789abcdef")
         .repeated()
@@ -298,10 +305,8 @@ pub fn uuid_parser() -> impl Parser<char, uuid::Uuid, Error = Simple<char>> {
                 .collect::<String>(),
         )
         .try_map(|((((a, b), c), d), e), span: std::ops::Range<usize>| {
-            Ok(
-                uuid::Uuid::parse_str(&format!("{}-{}-{}-{}-{}", a, b, c, d, e))
-                    .map_err(|e| Simple::custom(span.clone(), format!("{:?}", e)))?,
-            )
+            uuid::Uuid::parse_str(&format!("{}-{}-{}-{}-{}", a, b, c, d, e))
+                .map_err(|e| Simple::custom(span.clone(), format!("{:?}", e)))
         })
 }
 
@@ -312,12 +317,13 @@ pub fn uuid_parser() -> impl Parser<char, uuid::Uuid, Error = Simple<char>> {
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn agent_url_as_avatar_key_parser(
 ) -> impl Parser<char, SecondLifeAvatarKey, Error = Simple<char>> {
     just("secondlife:///app/agent/")
         .ignore_then(uuid_parser())
         .then_ignore(just("/about").or(just("/inspect")))
-        .map(|uuid| SecondLifeAvatarKey(uuid))
+        .map(SecondLifeAvatarKey)
 }
 
 /// represents a L$ amount
@@ -331,6 +337,7 @@ pub struct SecondLifeLindenAmount(u64);
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn linden_amount_parser() -> impl Parser<char, SecondLifeLindenAmount, Error = Simple<char>> {
     just("L$")
         .ignore_then(digits(10))
@@ -352,6 +359,7 @@ pub struct SecondLifeDistance(f64);
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn distance_parser() -> impl Parser<char, SecondLifeDistance, Error = Simple<char>> {
     digits(10)
         .then_ignore(just('.'))
@@ -457,6 +465,7 @@ pub enum SecondLifeSystemMessage {
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn snapshot_saved_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("Snapshot saved: ")
@@ -471,6 +480,7 @@ pub fn snapshot_saved_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn attachment_saved_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("Attachment has been saved").try_map(|_, _span: std::ops::Range<usize>| {
@@ -483,6 +493,7 @@ pub fn attachment_saved_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn sent_payment_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("You paid ")
@@ -510,6 +521,7 @@ pub fn sent_payment_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn received_payment_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     agent_url_as_avatar_key_parser()
@@ -537,6 +549,7 @@ pub fn received_payment_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn teleport_completed_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("Teleport completed from http://maps.secondlife.com/secondlife/")
@@ -551,6 +564,7 @@ pub fn teleport_completed_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn now_playing_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("Now playing: ")
@@ -565,6 +579,7 @@ pub fn now_playing_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn region_restart_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("The region you are in now is about to restart. If you stay in this region you will be logged out.")
@@ -578,6 +593,7 @@ pub fn region_restart_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn object_gave_object_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     take_until(just(" owned by "))
@@ -616,6 +632,7 @@ pub fn object_gave_object_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn avatar_gave_object_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("A group member named ")
@@ -636,6 +653,7 @@ pub fn avatar_gave_object_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn items_successfully_shared_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("Items successfully shared.").try_map(|_, _span: std::ops::Range<usize>| {
@@ -648,6 +666,7 @@ pub fn items_successfully_shared_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn modified_search_query_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("Your search query was modified and the words that were too short were removed.")
@@ -665,6 +684,7 @@ pub fn modified_search_query_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn simulator_version_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     just("The region you have entered is running a different simulator version.")
@@ -692,6 +712,7 @@ pub fn simulator_version_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn renamed_avatar_message_parser(
 ) -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     take_until(just(" is now known as"))
@@ -716,6 +737,7 @@ pub fn renamed_avatar_message_parser(
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn system_message_parser() -> impl Parser<char, SecondLifeSystemMessage, Error = Simple<char>> {
     snapshot_saved_message_parser().or(attachment_saved_message_parser().or(
         sent_payment_message_parser().or(received_payment_message_parser().or(
@@ -744,7 +766,7 @@ pub fn system_message_parser() -> impl Parser<char, SecondLifeSystemMessage, Err
 }
 
 /// represents a Second Life chat volume
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SecondLifeChatVolume {
     /// whisper (10m)
     Whisper,
@@ -758,11 +780,12 @@ pub enum SecondLifeChatVolume {
 
 impl SecondLifeChatVolume {
     /// identify the chat volume of a message and strip it off the message
+    #[must_use]
     pub fn volume_and_message(s: String) -> (SecondLifeChatVolume, String) {
-        if s.starts_with("whispers: ") {
-            (SecondLifeChatVolume::Whisper, s[10..].to_string())
-        } else if s.starts_with("shouts: ") {
-            (SecondLifeChatVolume::Shout, s[8..].to_string())
+        if let Some(whisper_message) = s.strip_prefix("whispers: ") {
+            (SecondLifeChatVolume::Whisper, whisper_message.to_string())
+        } else if let Some(shout_message) = s.strip_prefix("shouts: ") {
+            (SecondLifeChatVolume::Shout, shout_message.to_string())
         } else {
             (SecondLifeChatVolume::Say, s)
         }
@@ -770,7 +793,7 @@ impl SecondLifeChatVolume {
 }
 
 /// represents a Second Life area of significance
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SecondLifeArea {
     /// chat range
     ChatRange,
@@ -785,6 +808,7 @@ pub enum SecondLifeArea {
 /// # Errors
 ///
 /// returns an error if the string could not be parsed
+#[must_use]
 pub fn area_of_significance_parser() -> impl Parser<char, SecondLifeArea, Error = Simple<char>> {
     just("chat range")
         .to(SecondLifeArea::ChatRange)
@@ -1091,7 +1115,7 @@ fn sl_chat_log_line_parser() -> impl Parser<char, SecondLifeChatLogLine, Error =
 
 /// determine avatar log dir from avatar name
 fn avatar_log_dir(avatar_name: &str) -> Result<PathBuf, crate::Error> {
-    let avatar_dir_name = avatar_name.replace(" ", "_").to_lowercase();
+    let avatar_dir_name = avatar_name.replace(' ', "_").to_lowercase();
     tracing::debug!("Avatar dir name: {}", avatar_dir_name);
 
     let Some(home_dir) = dirs2::home_dir() else {
@@ -1184,7 +1208,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                 }
                 Ok(Some(line)) => {
                     last_line = if let Some(ref ll) = last_line {
-                        if line.line().starts_with(" ") || line.line() == "" {
+                        if line.line().starts_with(' ') || line.line() == "" {
                             Some(format!("{}\n{}", ll, line.line()))
                         } else {
                             if let Err(e) = tx2.send(ll.clone()).await {
@@ -1204,6 +1228,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
     });
 
     let mut notify_handles: BTreeMap<String, notify_rust::NotificationHandle> = BTreeMap::new();
+    let mut last_seen_in_chat_range: BTreeMap<String, time::PrimitiveDateTime> = BTreeMap::new();
 
     while let Some(line) = rx2.recv().await {
         println!("parsing line:\n{}", line);
@@ -1211,7 +1236,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
         println!("parse result:\n{:#?}", parsed_line);
 
         if let Ok(SecondLifeChatLogLine {
-            timestamp: _,
+            timestamp,
             event:
                 SecondLifeChatLogEvent::AvatarLine {
                     ref name,
@@ -1223,25 +1248,70 @@ async fn do_stuff() -> Result<(), crate::Error> {
                 },
         }) = parsed_line
         {
-            match notify_rust::Notification::new()
-                .appname("sl-hello-goodbye")
-                .summary("New person entered chat range")
-                .body(&format!("{} entered the chat range", name))
-                .hint(notify_rust::Hint::Resident(true))
-                .timeout(notify_rust::Timeout::Never)
-                .show()
+            let (last_seen_description, last_seen_age) = if let Some(last_seen_timestamp) =
+                last_seen_in_chat_range.get(&name.to_lowercase())
             {
-                Ok(notify_handle) => {
-                    notify_handles.insert(name.to_string().to_lowercase(), notify_handle);
+                if let Some(timestamp) = timestamp {
+                    let last_seen_age = timestamp - *last_seen_timestamp;
+                    if let Ok(std_last_seen_age) = last_seen_age.try_into() {
+                        (
+                            format!(
+                                "Last seen {} ago ({})",
+                                <humantime::Duration as From<std::time::Duration>>::from(
+                                    std_last_seen_age
+                                ),
+                                last_seen_timestamp
+                            ),
+                            Some(last_seen_age),
+                        )
+                    } else {
+                        (
+                            format!(
+                                "Could not convert last seen age to humantime: {}",
+                                last_seen_age
+                            ),
+                            Some(last_seen_age),
+                        )
+                    }
+                } else {
+                    (
+                        "Unable to determine timestamp for current message".to_string(),
+                        None,
+                    )
                 }
-                Err(e) => {
-                    tracing::error!("Error sending notification: {:?}", e);
+            } else {
+                ("Not seen recently".to_string(), None)
+            };
+            if last_seen_age.is_none()
+                || last_seen_age
+                    .is_some_and(|last_seen_age| last_seen_age > std::time::Duration::from_secs(5))
+            {
+                match notify_rust::Notification::new()
+                    .appname("sl-hello-goodbye")
+                    .summary("New person entered chat range")
+                    .body(&format!(
+                        "{} entered the chat range\n{}",
+                        name, last_seen_description
+                    ))
+                    .hint(notify_rust::Hint::Resident(true))
+                    .timeout(notify_rust::Timeout::Never)
+                    .show()
+                {
+                    Ok(notify_handle) => {
+                        notify_handles.insert(name.to_string().to_lowercase(), notify_handle);
+                    }
+                    Err(e) => {
+                        tracing::error!("Error sending notification: {:?}", e);
+                    }
                 }
+            }
+            if let Some(timestamp) = timestamp {
+                last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
             }
         }
 
         if let Ok(SecondLifeChatLogLine {
-            timestamp: _,
+            timestamp,
             event:
                 SecondLifeChatLogEvent::AvatarLine {
                     ref name,
@@ -1252,6 +1322,9 @@ async fn do_stuff() -> Result<(), crate::Error> {
                 },
         }) = parsed_line
         {
+            if let Some(timestamp) = timestamp {
+                last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
+            }
             let name = name.to_lowercase();
             let mut to_remove = Vec::new();
             for n in notify_handles.keys() {
@@ -1270,17 +1343,20 @@ async fn do_stuff() -> Result<(), crate::Error> {
         // leave announcements and left chat range
 
         if let Ok(SecondLifeChatLogLine {
-            timestamp: _,
+            timestamp,
             event:
                 SecondLifeChatLogEvent::AvatarLine {
-                    name,
-                    message: SecondLifeAvatarMessage::Chat { message, volume: _ },
+                    ref name,
+                    message:
+                        SecondLifeAvatarMessage::Chat {
+                            ref message,
+                            volume,
+                        },
                 },
         }) = parsed_line
         {
-            if name == options.avatar_name {
-                if let Ok(greeted) = welcome_greeting_parser().parse(message.clone().to_lowercase())
-                {
+            if *name == options.avatar_name {
+                if let Ok(greeted) = welcome_greeting_parser().parse(message.to_lowercase()) {
                     tracing::debug!("Found welcoming greeting greeting\n{:#?}", greeted);
                     for greeted in greeted {
                         let greeted = greeted.to_lowercase();
@@ -1297,6 +1373,24 @@ async fn do_stuff() -> Result<(), crate::Error> {
                         }
                     }
                 }
+            } else if let Some(timestamp) = timestamp {
+                if volume <= SecondLifeChatVolume::Say {
+                    last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
+                }
+            }
+        }
+
+        if let Ok(SecondLifeChatLogLine {
+            timestamp: Some(timestamp),
+            event:
+                SecondLifeChatLogEvent::AvatarLine {
+                    name,
+                    message: SecondLifeAvatarMessage::Emote { message: _, volume },
+                },
+        }) = parsed_line
+        {
+            if volume <= SecondLifeChatVolume::Say {
+                last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
             }
         }
     }

@@ -3,7 +3,7 @@ name = "sl-hello-goodbye"
 description = "Tails chat.txt log files and processes local chat lines and Entered chat range notifications to produce desktop notifications for people to still say Hello too and similar for goodbyes"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
 edition = "2021"
 publish = false
@@ -34,6 +34,7 @@ uuid = "1.8.0"
 ariadne = { version = "0.4.0", features = ["auto-color"] }
 chumsky = "0.9.3"
 notify-rust = "4.10.0"
+humantime = "2.1.0"
 
 [dev-dependencies]
 dotenvy = "0.15.7"
