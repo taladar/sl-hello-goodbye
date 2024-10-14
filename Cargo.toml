@@ -3,7 +3,7 @@ name = "sl-hello-goodbye"
 description = "Tails chat.txt log files and processes local chat lines and Entered chat range notifications to produce desktop notifications for people to still say Hello too and similar for goodbyes"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
 edition = "2021"
 publish = false
@@ -17,32 +17,34 @@ debug = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = { version = "1.0.58" }
+thiserror = { version = "1.0.64" }
 
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
-clap = { version = "4.5.3", features = ["derive", "cargo"] }
-tokio = { version = "1.36.0", features = [ "full" ] }
+clap = { version = "4.5.20", features = ["derive", "cargo"] }
+tokio = { version = "1.40.0", features = [ "full" ] }
 
-futures = { version = "0.3.30" }
+futures = { version = "0.3.31" }
 tracing = { version = "0.1.40" }
 tracing-subscriber = { version = "0.3.18", features = [ "env-filter", "tracing-log" ] }
 tracing-appender = { version = "0.2.3" }
 linemux = "0.3.0"
 dirs2 = "3.0.1"
-time = { version = "0.3.34", features = ["formatting", "parsing", "macros"] }
-uuid = "1.8.0"
-ariadne = { version = "0.4.0", features = ["auto-color"] }
+time = { version = "0.3.36", features = ["formatting", "parsing", "macros"] }
+uuid = "1.10.0"
+ariadne = { version = "0.4.1", features = ["auto-color"] }
 chumsky = "0.9.3"
-notify-rust = "4.10.0"
+notify-rust = "4.11.3"
 humantime = "2.1.0"
+red = "0.1.1"
+redb = "2.1.4"
 
 [dev-dependencies]
 dotenvy = "0.15.7"
 envy = "0.4.2"
-pretty_assertions = { version = "1.4.0" }
-serde = { version = "1.0.197", features = ["derive"] }
+pretty_assertions = { version = "1.4.1" }
+serde = { version = "1.0.210", features = ["derive"] }
 serde-aux = { version = "4.5.0", default-features = false }
-tracing-test = "0.2.4"
+tracing-test = "0.2.5"
 
 [package.metadata.deb]
 name = "sl-hello-goodbye"

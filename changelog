@@ -1,3 +1,9 @@
+sl-hello-goodbye (0.2.0-1) unstable; urgency=medium
+
+  * add persistent db for last seen functionality
+
+ -- Matthias Hörmann <mhoermann@gmail.com>  Mon, 14 Oct 2024 23:49:07 +0000
+
 sl-hello-goodbye (0.1.1-1) unstable; urgency=medium
 
   * add last seen functionality

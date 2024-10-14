@@ -35,6 +35,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chumsky::text::whitespace;
+use redb::ReadableTable as _;
 use tracing::instrument;
 use tracing_subscriber::{
     filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer, Registry,
@@ -42,6 +43,15 @@ use tracing_subscriber::{
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use chumsky::{prelude::*, text::digits, Parser};
+
+/// describes the redb table to store the last seen time
+/// the key string is the avatar legacy name, the other one is
+/// the formatted time
+const LAST_SEEN_TABLE: redb::TableDefinition<String, String> =
+    redb::TableDefinition::new("last_seen");
+
+const TIME_FORMAT: &[time::format_description::BorrowedFormatItem<'_>] =
+    time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
 /// Error enum for the application
 #[derive(thiserror::Error, Debug)]
@@ -73,6 +83,30 @@ pub enum Error {
     /// error joining the log reader task before shutdown
     #[error("error joining the log reader task before shutdown: {0}")]
     JoinError(#[from] tokio::task::JoinError),
+    /// redb database error
+    #[error("redb database error: {0}")]
+    DatabaseError(#[from] redb::DatabaseError),
+    /// redb transaction error
+    #[error("redb transaction error: {0}")]
+    TransactionError(#[from] redb::TransactionError),
+    /// redb table error
+    #[error("redb table error: {0}")]
+    TableError(#[from] redb::TableError),
+    /// redb storage error
+    #[error("redb storage error: {0}")]
+    StorageError(#[from] redb::StorageError),
+    /// redb commit error
+    #[error("redb storage error: {0}")]
+    CommitError(#[from] redb::CommitError),
+    /// error formatting time
+    #[error("error formatting time: {0}")]
+    TimeFormatError(#[from] time::error::Format),
+    /// error parsing time
+    #[error("error parsing time: {0}")]
+    TimeParseError(#[from] time::error::Parse),
+    /// error creating directory for database
+    #[error("error creating directory for database: {0}")]
+    CreateDbDirError(std::io::Error),
 }
 
 /// The Clap type for all the commandline parameters
@@ -1156,11 +1190,34 @@ fn welcome_greeting_parser() -> impl Parser<char, Vec<String>, Error = Simple<ch
         })
 }
 
+/// write last seen timestamp to redb database
+fn write_last_seen_to_db(
+    db: &redb::Database,
+    name: &str,
+    timestamp: &time::PrimitiveDateTime,
+) -> Result<(), crate::Error> {
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(LAST_SEEN_TABLE)?;
+        table.insert(name.to_lowercase(), &timestamp.format(TIME_FORMAT)?)?;
+    }
+    write_txn.commit()?;
+    Ok(())
+}
+
 /// The main behaviour of the binary should go here
 #[instrument]
 async fn do_stuff() -> Result<(), crate::Error> {
     let options = <Options as clap::Parser>::parse();
     tracing::debug!("{:#?}", options);
+
+    let Some(db_path) = dirs2::config_dir() else {
+        panic!("Could not determine directory for database storage");
+    };
+    let db_path = db_path.join(clap::crate_name!());
+    std::fs::create_dir_all(db_path.to_owned()).map_err(crate::Error::CreateDbDirError)?;
+
+    let db = redb::Database::create(db_path.join("last_seen.redb"))?;
 
     let avatar_dir = avatar_log_dir(&options.avatar_name)?;
 
@@ -1229,6 +1286,22 @@ async fn do_stuff() -> Result<(), crate::Error> {
 
     let mut notify_handles: BTreeMap<String, notify_rust::NotificationHandle> = BTreeMap::new();
     let mut last_seen_in_chat_range: BTreeMap<String, time::PrimitiveDateTime> = BTreeMap::new();
+
+    {
+        let read_txn = db.begin_read()?;
+        if let Ok(table) = read_txn.open_table(LAST_SEEN_TABLE) {
+            let _ = table.iter().map(|mut range| {
+                while let Some(item) = range.next() {
+                    let (key, value) = item?;
+                    let name = key.value();
+                    let timestamp = value.value();
+                    let timestamp = time::PrimitiveDateTime::parse(&timestamp, &TIME_FORMAT)?;
+                    last_seen_in_chat_range.insert(name, timestamp);
+                }
+                Ok::<(), crate::Error>(())
+            })?;
+        }
+    }
 
     while let Some(line) = rx2.recv().await {
         println!("parsing line:\n{}", line);
@@ -1307,6 +1380,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
             }
             if let Some(timestamp) = timestamp {
                 last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
+                write_last_seen_to_db(&db, &name, &timestamp)?;
             }
         }
 
@@ -1324,6 +1398,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
         {
             if let Some(timestamp) = timestamp {
                 last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
+                write_last_seen_to_db(&db, &name, &timestamp)?;
             }
             let name = name.to_lowercase();
             let mut to_remove = Vec::new();
@@ -1341,6 +1416,36 @@ async fn do_stuff() -> Result<(), crate::Error> {
 
         // TODO:
         // leave announcements and left chat range
+        // Examples
+        // "Take care all"
+        // "RL is calling me"
+        // "I have to go"
+        // "I have to head out"
+        // "I have to take off"
+        // "(Good)bye everyone"
+        // "(Good)bye everybody"
+        // "(Good)bye all"
+        // "Dinnertime for me"
+        // "I have to get some sleep"
+        // "It is my bedtime"
+        // "Gotta go"
+        // "Good night all"
+        // "I am going to call it a day"
+        // "I don't feel so good"
+        // "I am going to lie down"
+        // "I am going to get some rest"
+        // "I have to get up early"
+        // (abbreviated versions like tc for take care, gn for good night)
+        // (other people saying good bye or good night to someone or telling them to take care, sweet dreams, sleep well, have a good rest)
+        // (though that might also be the person leaving saying good bye to specific people)
+        //
+        // relog or afk announcements and welcome back
+        // "I have to relog"
+        // "relog, brb"
+        // "afk"
+        // "brb"
+        //
+        // "back"
 
         if let Ok(SecondLifeChatLogLine {
             timestamp,
@@ -1376,6 +1481,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
             } else if let Some(timestamp) = timestamp {
                 if volume <= SecondLifeChatVolume::Say {
                     last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
+                    write_last_seen_to_db(&db, &name, &timestamp)?;
                 }
             }
         }
@@ -1391,6 +1497,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
         {
             if volume <= SecondLifeChatVolume::Say {
                 last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
+                write_last_seen_to_db(&db, &name, &timestamp)?;
             }
         }
     }
