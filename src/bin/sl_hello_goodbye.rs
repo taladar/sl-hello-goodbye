@@ -164,7 +164,7 @@ impl std::fmt::Display for ChumskyError {
                 },
             );
 
-            let report = Report::build(ReportKind::Error, (), e.span().start)
+            let report = Report::build(ReportKind::Error, e.span())
                 .with_code(3)
                 .with_message(msg)
                 .with_label(
@@ -1215,6 +1215,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
         panic!("Could not determine directory for database storage");
     };
     let db_path = db_path.join(clap::crate_name!());
+    let db_path = db_path.join(&options.avatar_name);
     std::fs::create_dir_all(db_path.to_owned()).map_err(crate::Error::CreateDbDirError)?;
 
     let db = redb::Database::create(db_path.join("last_seen.redb"))?;

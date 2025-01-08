@@ -1,3 +1,10 @@
+sl-hello-goodbye (0.2.1-1) unstable; urgency=medium
+
+  * move persistent db for last seen functionality to avatar specific dir
+  * upgrade dependencies
+
+ -- Matthias Hörmann <mhoermann@gmail.com>  Wed, 08 Jan 2025 21:07:07 +0100
+
 sl-hello-goodbye (0.2.0-1) unstable; urgency=medium
 
   * add persistent db for last seen functionality
