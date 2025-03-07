@@ -1,3 +1,7 @@
+## 0.3.0
+
+extract log parser into sl-chat-log-parser crate and use that in this crate
+
 ## 0.2.1
 
 move persistent db for last seen functionality to avatar specific dir
