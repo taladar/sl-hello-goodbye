@@ -2,8 +2,7 @@
 
 set -e -u
 
-for b in centos6 centos7 centos8 stretch buster bullseye
-do
+for b in centos6 centos7 centos8 stretch buster bullseye; do
   echo "Pushing build_${b}" >&2
   git push origin HEAD:refs/heads/build_${b}
 done

@@ -1,3 +1,9 @@
+# Changelog
+
+## 0.3.1
+
+update dependencies
+
 ## 0.3.0
 
 extract log parser into sl-chat-log-parser crate and use that in this crate

@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use chumsky::text::whitespace;
-use redb::ReadableTable as _;
+use redb::{ReadableDatabase as _, ReadableTable as _};
 use tracing::instrument;
 use tracing_subscriber::{
     filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer, Registry,
