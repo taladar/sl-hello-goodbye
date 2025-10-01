@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+update dependencies
+fix area line parsing (region/the region)
+
 ## 0.3.1
 
 update dependencies
