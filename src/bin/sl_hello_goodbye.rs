@@ -38,11 +38,11 @@ use chumsky::text::whitespace;
 use redb::{ReadableDatabase as _, ReadableTable as _};
 use tracing::instrument;
 use tracing_subscriber::{
-    filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer, Registry,
+    EnvFilter, Layer, Registry, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
-use chumsky::{prelude::*, Parser};
+use chumsky::{Parser, prelude::*};
 
 /// describes the redb table to store the last seen time
 /// the key string is the avatar legacy name, the other one is
@@ -552,11 +552,11 @@ async fn do_stuff() -> Result<(), crate::Error> {
                         }
                     }
                 }
-            } else if let Some(timestamp) = timestamp {
-                if volume <= sl_types::chat::ChatVolume::Say {
-                    last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
-                    write_last_seen_to_db(&db, name, &timestamp)?;
-                }
+            } else if let Some(timestamp) = timestamp
+                && volume <= sl_types::chat::ChatVolume::Say
+            {
+                last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
+                write_last_seen_to_db(&db, name, &timestamp)?;
             }
         }
 
@@ -569,11 +569,10 @@ async fn do_stuff() -> Result<(), crate::Error> {
                         sl_chat_log_parser::avatar_messages::AvatarMessage::Emote { message: _, volume },
                 },
         }) = parsed_line
+            && volume <= sl_types::chat::ChatVolume::Say
         {
-            if volume <= sl_types::chat::ChatVolume::Say {
-                last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
-                write_last_seen_to_db(&db, &name, &timestamp)?;
-            }
+            last_seen_in_chat_range.insert(name.to_lowercase(), timestamp);
+            write_last_seen_to_db(&db, &name, &timestamp)?;
         }
     }
 

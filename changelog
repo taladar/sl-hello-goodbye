@@ -1,3 +1,12 @@
+sl-hello-goodbye (0.3.3-1) unstable; urgency=medium
+
+  * update dependencies
+  * publish true
+  * add note to README about unfinished goodbye part
+  * edition 2024
+
+ -- Matthias Hörmann <mhoermann@gmail.com>  Tue, 21 Oct 2025 21:52:07 +0200
+
 sl-hello-goodbye (0.3.2-1) unstable; urgency=medium
 
   * update dependencies

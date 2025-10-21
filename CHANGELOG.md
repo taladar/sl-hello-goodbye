@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3
+
+publish = true
+update dependencies
+add note to README about unimplemented goodbye part
+edition 2024
+
 ## 0.3.2
 
 update dependencies
