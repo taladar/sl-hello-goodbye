@@ -38,11 +38,15 @@ use chumsky::text::whitespace;
 use redb::{ReadableDatabase as _, ReadableTable as _};
 use tracing::instrument;
 use tracing_subscriber::{
-    EnvFilter, Layer, Registry, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt,
+    EnvFilter, Layer as _, Registry, filter::LevelFilter, layer::SubscriberExt as _,
+    util::SubscriberInitExt as _,
 };
 
-use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
-use chumsky::{Parser, prelude::*};
+use ariadne::{Color, Fmt as _, Label, Report, ReportKind, Source};
+use chumsky::{
+    IterParser as _, Parser,
+    prelude::{any, end, just},
+};
 
 /// describes the redb table to store the last seen time
 /// the key string is the avatar legacy name, the other one is
@@ -255,7 +259,7 @@ fn welcome_greeting_parser<'src>()
                 just(",")
                     .or(just("and"))
                     .or(just("und"))
-                    .or(just("\n").or(end().map(|_| "")))
+                    .or(just("\n").or(end().to("")))
                     .rewind()
             )
             .map(|(s, _)| s.trim().to_string())
@@ -296,7 +300,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
     };
     let db_path = db_path.join(clap::crate_name!());
     let db_path = db_path.join(&options.avatar_name);
-    std::fs::create_dir_all(&db_path).map_err(crate::Error::CreateDbDirError)?;
+    fs_err::create_dir_all(&db_path).map_err(crate::Error::CreateDbDirError)?;
 
     let db = redb::Database::create(db_path.join("last_seen.redb"))?;
 
@@ -371,7 +375,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
     {
         let read_txn = db.begin_read()?;
         if let Ok(table) = read_txn.open_table(LAST_SEEN_TABLE) {
-            let _ = table.iter().map(|mut range| {
+            drop(table.iter().map(|mut range| {
                 for item in range.by_ref() {
                     let (key, value) = item?;
                     let name = key.value();
@@ -380,16 +384,16 @@ async fn do_stuff() -> Result<(), crate::Error> {
                     last_seen_in_chat_range.insert(name, timestamp);
                 }
                 Ok::<(), crate::Error>(())
-            })?;
+            })?);
         }
     }
 
     while let Some(line) = rx2.recv().await {
-        println!("parsing line:\n{}", line);
+        println!("parsing line:\n{line}");
         let parsed_line = sl_chat_log_parser::chat_log_line_parser()
             .parse(&line)
             .into_result();
-        println!("parse result:\n{:#?}", parsed_line);
+        println!("parse result:\n{parsed_line:#?}");
 
         if let Ok(sl_chat_log_parser::ChatLogLine {
             timestamp,
@@ -423,8 +427,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                     } else {
                         (
                             format!(
-                                "Could not convert last seen age to humantime: {}",
-                                last_seen_age
+                                "Could not convert last seen age to humantime: {last_seen_age}",
                             ),
                             Some(last_seen_age),
                         )
@@ -446,8 +449,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                     .appname("sl-hello-goodbye")
                     .summary("New person entered chat range")
                     .body(&format!(
-                        "{} entered the chat range\n{}",
-                        name, last_seen_description
+                        "{name} entered the chat range\n{last_seen_description}",
                     ))
                     .hint(notify_rust::Hint::Resident(true))
                     .timeout(notify_rust::Timeout::Never)
@@ -626,10 +628,10 @@ async fn main() -> Result<(), Error> {
     }
     log_panics::init();
     match do_stuff().await {
-        Ok(_) => (),
+        Ok(()) => (),
         Err(e) => {
-            tracing::error!("{}", e);
-            eprintln!("{}", e);
+            tracing::error!("{e}");
+            eprintln!("{e}");
             std::process::exit(1);
         }
     }
