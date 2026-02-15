@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "sl-hello-goodbye"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "ariadne",
  "chumsky",

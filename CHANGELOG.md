@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 - 2026-02-15 20:46:25Z
+
+### 💼 Other
+
+- *(release)* Add release.sh, cliff config and new lints
+
+### ⚙️ Miscellaneous Tasks
+
+- *(dependencies)* Update dependencies
+
 ## 0.3.3
 
 publish = true
