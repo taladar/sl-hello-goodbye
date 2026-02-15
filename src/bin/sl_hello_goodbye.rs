@@ -83,7 +83,7 @@ pub enum Error {
     MuxedLinesAddFileError(std::io::Error),
     /// error parsing chat log line
     #[error("error parsing chat log line: {0}")]
-    ChatLogLineParseError(ChumskyError),
+    ChatLogLineParseError(ChumskyError<chumsky::error::Rich<'static, char>>),
     /// error joining the log reader task before shutdown
     #[error("error joining the log reader task before shutdown: {0}")]
     JoinError(#[from] tokio::task::JoinError),
@@ -130,16 +130,16 @@ struct Options {
 /// the chumsky errors themselves lack Display and std::error::Error
 /// implementations
 #[derive(Debug)]
-pub struct ChumskyError {
+pub struct ChumskyError<E> {
     /// description of the object we were trying to parse
     pub description: String,
     /// source string for parsing
     pub source: String,
     /// errors encountered during parsing
-    pub errors: Vec<chumsky::error::Simple<char>>,
+    pub errors: Vec<E>,
 }
 
-impl std::fmt::Display for ChumskyError {
+impl std::fmt::Display for ChumskyError<chumsky::error::Rich<'static, char>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for e in &self.errors {
             let msg = format!(
@@ -150,50 +150,39 @@ impl std::fmt::Display for ChumskyError {
                 } else {
                     "Unexpected end of input"
                 },
-                if let Some(label) = e.label() {
-                    format!(" while parsing {}", label)
-                } else {
-                    String::new()
-                },
+                format_args!(" while parsing {:?}", e.contexts().collect::<Vec<_>>()),
                 if e.expected().len() == 0 {
                     "end of input".to_string()
                 } else {
                     e.expected()
-                        .map(|expected| match expected {
-                            Some(expected) => expected.to_string(),
-                            None => "end of input".to_string(),
-                        })
+                        .map(|rich_pattern| rich_pattern.to_string())
                         .collect::<Vec<_>>()
                         .join(", ")
                 },
             );
 
-            let report = Report::build(ReportKind::Error, e.span())
+            let report = Report::build(ReportKind::Error, e.span().start..e.span().end)
                 .with_code(3)
                 .with_message(msg)
                 .with_label(
-                    Label::new(e.span())
+                    Label::new(e.span().start..e.span().end)
                         .with_message(format!(
                             "Unexpected {}",
-                            e.found()
-                                .map(|c| format!("token {}", c.fg(Color::Red)))
-                                .unwrap_or_else(|| "end of input".to_string())
+                            e.found().map_or_else(
+                                || "end of input".to_string(),
+                                |c| format!("token {}", c.fg(Color::Red))
+                            )
                         ))
                         .with_color(Color::Red),
                 );
 
             let report = match e.reason() {
-                chumsky::error::SimpleReason::Unclosed { span, delimiter } => report.with_label(
-                    Label::new(span.clone())
-                        .with_message(format!(
-                            "Unclosed delimiter {}",
-                            delimiter.fg(Color::Yellow)
-                        ))
-                        .with_color(Color::Yellow),
-                ),
-                chumsky::error::SimpleReason::Unexpected => report,
-                chumsky::error::SimpleReason::Custom(msg) => report.with_label(
-                    Label::new(e.span())
+                chumsky::error::RichReason::ExpectedFound {
+                    expected: _,
+                    found: _,
+                } => report,
+                chumsky::error::RichReason::Custom(msg) => report.with_label(
+                    Label::new(e.span().start..e.span().end)
                         .with_message(format!("{}", msg.fg(Color::Yellow)))
                         .with_color(Color::Yellow),
                 ),
@@ -203,18 +192,20 @@ impl std::fmt::Display for ChumskyError {
             report
                 .finish()
                 .write(Source::from(&self.source), &mut s)
-                .map_err(|_| <std::fmt::Error as std::default::Default>::default())?;
-            let Ok(s) = std::str::from_utf8(&s) else {
-                tracing::error!("Expected ariadne to produce valid UTF-8");
-                return Err(std::fmt::Error);
-            };
-            write!(f, "{}", s)?;
+                .map_err(|_err| <std::fmt::Error as std::default::Default>::default())?;
+            let s = std::str::from_utf8(&s)
+                .map_err(|_err| <std::fmt::Error as std::default::Default>::default())?;
+            write!(f, "{s}")?;
         }
         Ok(())
     }
 }
 
-impl std::error::Error for ChumskyError {
+impl<E> std::error::Error for ChumskyError<E>
+where
+    E: std::fmt::Debug,
+    Self: std::fmt::Display,
+{
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }
@@ -233,12 +224,25 @@ fn avatar_log_dir(avatar_name: &str) -> Result<PathBuf, crate::Error> {
     Ok(home_dir.join(".firestorm/").join(avatar_dir_name))
 }
 
+/// replacement for take_until combinator in old chumsky versions
+macro_rules! take_until {
+    ($p:expr) => {
+        any()
+            .and_is($p.not())
+            .repeated()
+            .collect::<String>()
+            .then($p)
+    };
+}
+
 /// parse a chat line as a welcome greeting and return the names of the greeted people
 ///
 /// # Errors
 ///
 /// returns an error if the parser fails
-fn welcome_greeting_parser() -> impl Parser<char, Vec<String>, Error = Simple<char>> {
+fn welcome_greeting_parser<'src>()
+-> impl Parser<'src, &'src str, Vec<String>, chumsky::extra::Err<chumsky::error::Rich<'src, char>>>
+{
     just("hi")
         .or(just("hello"))
         .or(just("hallo"))
@@ -247,20 +251,23 @@ fn welcome_greeting_parser() -> impl Parser<char, Vec<String>, Error = Simple<ch
         .or(just("welcome back"))
         .ignore_then(whitespace())
         .ignore_then(
-            take_until(
+            take_until!(
                 just(",")
                     .or(just("and"))
                     .or(just("und"))
                     .or(just("\n").or(end().map(|_| "")))
-                    .rewind(),
+                    .rewind()
             )
-            .separated_by(just(",").or(just("and")).or(just("und")).or(just("\n"))),
+            .map(|(s, _)| s.trim().to_string())
+            .separated_by(
+                just(",")
+                    .or(just("and"))
+                    .or(just("und"))
+                    .or(just("\n"))
+                    .ignored(),
+            )
+            .collect::<Vec<_>>(),
         )
-        .try_map(|s, _span: std::ops::Range<usize>| {
-            Ok(s.into_iter()
-                .map(|(s, _)| s.into_iter().collect::<String>().trim().to_string())
-                .collect())
-        })
 }
 
 /// write last seen timestamp to redb database
@@ -379,7 +386,9 @@ async fn do_stuff() -> Result<(), crate::Error> {
 
     while let Some(line) = rx2.recv().await {
         println!("parsing line:\n{}", line);
-        let parsed_line = sl_chat_log_parser::chat_log_line_parser().parse(line.clone());
+        let parsed_line = sl_chat_log_parser::chat_log_line_parser()
+            .parse(&line)
+            .into_result();
         println!("parse result:\n{:#?}", parsed_line);
 
         if let Ok(sl_chat_log_parser::ChatLogLine {
@@ -535,7 +544,8 @@ async fn do_stuff() -> Result<(), crate::Error> {
         }) = parsed_line
         {
             if *name == options.avatar_name {
-                if let Ok(greeted) = welcome_greeting_parser().parse(message.to_lowercase()) {
+                let lc_message = message.to_lowercase();
+                if let Ok(greeted) = welcome_greeting_parser().parse(&lc_message).into_result() {
                     tracing::debug!("Found welcoming greeting greeting\n{:#?}", greeted);
                     for greeted in greeted {
                         let greeted = greeted.to_lowercase();
@@ -635,7 +645,7 @@ mod test {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_welcome_greeting_parser_one_avatar() -> Result<(), Error> {
-        match welcome_greeting_parser().parse("hello john") {
+        match welcome_greeting_parser().parse("hello john").into_result() {
             Ok(parsed) => {
                 assert_eq!(parsed, ["john"]);
             }
@@ -656,7 +666,10 @@ mod test {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_welcome_greeting_parser_two_avatars() -> Result<(), Error> {
-        match welcome_greeting_parser().parse("hello john and paul") {
+        match welcome_greeting_parser()
+            .parse("hello john and paul")
+            .into_result()
+        {
             Ok(parsed) => {
                 assert_eq!(parsed, ["john", "paul"]);
             }
@@ -677,7 +690,10 @@ mod test {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_welcome_greeting_parser_three_avatars() -> Result<(), Error> {
-        match welcome_greeting_parser().parse("hello john, paul and mary") {
+        match welcome_greeting_parser()
+            .parse("hello john, paul and mary")
+            .into_result()
+        {
             Ok(parsed) => {
                 assert_eq!(parsed, ["john", "paul", "mary"]);
             }

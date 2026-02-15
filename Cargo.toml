@@ -38,25 +38,25 @@ sl_hello_goodbye = { path = "/usr/bin/sl_hello_goodbye" }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ariadne = { version = "0.5.1", features = ["auto-color"] }
-chumsky = "=0.9.3"
-clap = { version = "4.5.50", features = ["derive", "cargo"] }
+ariadne = { version = "0.6.0", features = ["auto-color"] }
+chumsky = "0.12.0"
+clap = { version = "4.5.58", features = ["derive", "cargo"] }
 dirs2 = "3.0.1"
 humantime = "2.3.0"
 linemux = "0.3.0"
 
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
-notify-rust = "4.11.7"
+notify-rust = "4.12.0"
 redb = "3.1.0"
-sl-chat-log-parser = "0.1.5"
-sl-types = { version = "0.1.10", features = ["chumsky"] }
-thiserror = { version = "2.0.17" }
-time = { version = "0.3.44", features = ["formatting", "parsing", "macros"] }
-tokio = { version = "1.48.0", features = [ "full" ] }
+sl-chat-log-parser = "0.2.0"
+sl-types = { version = "0.2.0", features = ["chumsky"] }
+thiserror = { version = "2.0.18" }
+time = { version = "0.3.47", features = ["formatting", "parsing", "macros"] }
+tokio = { version = "1.49.0", features = [ "full" ] }
 
-tracing = { version = "0.1.41" }
-tracing-appender = { version = "0.2.3" }
-tracing-subscriber = { version = "0.3.20", features = [ "env-filter", "tracing-log" ] }
+tracing = { version = "0.1.44" }
+tracing-appender = { version = "0.2.4" }
+tracing-subscriber = { version = "0.3.22", features = [ "env-filter", "tracing-log" ] }
 
 [dev-dependencies]
 dotenvy = "0.15.7"
@@ -64,7 +64,7 @@ envy = "0.4.2"
 pretty_assertions = { version = "1.4.1" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde-aux = { version = "4.7.0", default-features = false }
-tracing-test = "0.2.5"
+tracing-test = "0.2.6"
 
 [profile.release]
 # do not strip debug info from release builds, useful for debugging those, cargo-flamegraph profiling or similar use cases
