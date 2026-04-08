@@ -40,24 +40,24 @@ sl_hello_goodbye = { path = "/usr/bin/sl_hello_goodbye" }
 [dependencies]
 ariadne = { version = "0.6.0", features = ["auto-color"] }
 chumsky = "0.12.0"
-clap = { version = "4.5.60", features = ["derive", "cargo"] }
+clap = { version = "4.6.0", features = ["derive", "cargo"] }
 dirs2 = "3.0.1"
 fs-err = "3.3.0"
 humantime = "2.3.0"
 linemux = "0.3.0"
 
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
-notify-rust = "4.12.0"
-redb = "3.1.1"
-sl-chat-log-parser = "0.2.0"
-sl-types = { version = "0.2.1", features = ["chumsky"] }
+notify-rust = "4.14.0"
+redb = "4.0.0"
+sl-chat-log-parser = "0.2.3"
+sl-types = { version = "0.2.3", features = ["chumsky"] }
 thiserror = { version = "2.0.18" }
 time = { version = "0.3.47", features = ["formatting", "parsing", "macros"] }
-tokio = { version = "1.50.0", features = ["full"] }
+tokio = { version = "1.51.1", features = ["full"] }
 
 tracing = { version = "0.1.44" }
 tracing-appender = { version = "0.2.4" }
-tracing-subscriber = { version = "0.3.22", features = ["env-filter", "tracing-log"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }
 
 [dev-dependencies]
 dotenvy = "0.15.7"
