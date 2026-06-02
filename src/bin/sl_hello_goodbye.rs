@@ -600,10 +600,10 @@ async fn do_stuff() -> Result<(), crate::Error> {
 async fn main() -> Result<(), Error> {
     let terminal_env_filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::WARN.into())
-        .parse(std::env::var("RUST_LOG").unwrap_or_else(|_| "".to_string()))?;
+        .parse(std::env::var("RUST_LOG").unwrap_or_else(|_| "warn".to_string()))?;
     let file_env_filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::TRACE.into())
-        .parse(std::env::var("SL_HELLO_GOODBYE_LOG").unwrap_or_else(|_| "".to_string()))?;
+        .parse(std::env::var("SL_HELLO_GOODBYE_LOG").unwrap_or_else(|_| "trace".to_string()))?;
     let registry = Registry::default();
     let registry =
         registry.with(tracing_subscriber::fmt::Layer::default().with_filter(terminal_env_filter));
