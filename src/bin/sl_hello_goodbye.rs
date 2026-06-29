@@ -125,7 +125,9 @@ pub enum Error {
        version = clap::crate_version!(),
        )]
 struct Options {
-    /// name of the logged in avatar whose chat.txt log file to watch (not display name)
+    /// name of the logged in avatar whose chat.txt log file to watch (not display name);
+    /// may carry a Firestorm grid suffix (e.g. "Foo Bar.second_life_beta") to select the
+    /// per-grid log directory and greeting state
     #[clap(long)]
     avatar_name: String,
 }
@@ -294,6 +296,17 @@ fn write_last_seen_to_db(
 async fn do_stuff() -> Result<(), crate::Error> {
     let options = <Options as clap::Parser>::parse();
     tracing::debug!("{:#?}", options);
+
+    // The instance name passed in may carry a grid suffix (e.g. ".second_life_beta") so
+    // that per-grid log directories and greeting state stay separate. An avatar's chat-log
+    // name never contains a '.', so the part before the first '.' is the clean avatar name
+    // used for self-greeting matching.
+    let clean_avatar_name = options
+        .avatar_name
+        .split('.')
+        .next()
+        .unwrap_or(&options.avatar_name)
+        .to_string();
 
     let Some(db_path) = dirs2::config_dir() else {
         return Err(crate::Error::CouldNotDetermineDatabaseStorageDir);
@@ -545,7 +558,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                 },
         }) = parsed_line
         {
-            if *name == options.avatar_name {
+            if *name == clean_avatar_name {
                 let lc_message = message.to_lowercase();
                 if let Ok(greeted) = welcome_greeting_parser().parse(&lc_message).into_result() {
                     tracing::debug!("Found welcoming greeting greeting\n{:#?}", greeted);
