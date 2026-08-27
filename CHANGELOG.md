@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.3 - 2026-08-27 09:00:47Z
+
+### 🚀 Features
+
+- *(grid)* Handle Firestorm grid suffix in avatar name
+
+### ⚙️ Miscellaneous Tasks
+
+- *(template)* Sync with cargo-generate template and drop unused packaging
+- *(dependencies)* Update dependencies
+
 ## 0.4.2 - 2026-04-08 11:48:11Z
 
 ### ⚙️ Miscellaneous Tasks
