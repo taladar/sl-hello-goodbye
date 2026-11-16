@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.4 - 2026-11-16 17:21:02Z
+
+### ⚙️ Miscellaneous Tasks
+
+- *(dependencies)* Update dependencies
+- Publish GitHub releases only after all assets are uploaded
+- *(dependencies)* Update dependencies
+
 ## 0.4.3 - 2026-08-27 09:00:47Z
 
 ### 🚀 Features
