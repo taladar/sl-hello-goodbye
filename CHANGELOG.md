@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.5 - 2026-11-21 12:45:36Z
+
+### ⚙️ Miscellaneous Tasks
+
+- Build release binaries for Linux only
+- *(dependencies)* Update dependencies, replace humantime
+
 ## 0.4.4 - 2026-11-16 17:21:02Z
 
 ### ⚙️ Miscellaneous Tasks
