@@ -197,9 +197,9 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "chumsky"
-version = "0.14.1"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed246b3ad9e6e691121c0b2f802fce56917f509a513b50522b11f9c243f1d9c1"
+checksum = "6313a87def838ae23848f344d38799e6370342efd0ec0229b15469d3b6459923"
 dependencies = [
  "hashbrown",
  "regex-automata",
@@ -211,9 +211,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.6.7"
+version = "4.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa8876b300ab35ba921adea3dfd70157a46249b33f95c9084ae5709785478946"
+checksum = "844c5c0b65be192cb68d570cca1b21a6444431d24e39c084dc0336177015337c"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -233,9 +233,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.6.7"
+version = "4.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9c751b79415d4e559e3d1fcf128e09e720eb673a06d26cf6f392d37d75b66e0"
+checksum = "b4c174f11f949b9ca8c60580925e282b9cbd5454750e506f08648b2038080cd7"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -515,12 +515,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "humantime"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
 
 [[package]]
 name = "inotify"
@@ -1017,9 +1011,9 @@ checksum = "350932f7e8b2d0333d2537f42671a837473576c00e128fbee84c819ea08783b5"
 
 [[package]]
 name = "redb"
-version = "4.6.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "096b1dd5ec053c9c2a5a26a93aafeadf73ebcb710ea54dc3151f17a8e20535ef"
+checksum = "11175cc688ba1b9d3cec4fe582fd82cb97e2a82e28ccc8101b7b8030a8003280"
 dependencies = [
  "libc",
 ]
@@ -1218,9 +1212,9 @@ dependencies = [
 
 [[package]]
 name = "sl-chat-log-parser"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0d8cc67c41ea2a8a57c6bc0873802ce1647f90e84f619eb126a522604d638a5"
+checksum = "6c923892add0c628fe1fe4b8c89fa1ea230df022f7e023054b658bb0296da1f3"
 dependencies = [
  "bytesize",
  "chumsky",
@@ -1239,7 +1233,6 @@ dependencies = [
  "dotenvy",
  "envy",
  "fs-err",
- "humantime",
  "linemux",
  "log-panics",
  "notify-rust",
@@ -1260,9 +1253,9 @@ dependencies = [
 
 [[package]]
 name = "sl-types"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "337a97b1d29bead6396378059dacb6f76392bb9419e8ef33cd98d3fb67c1add4"
+checksum = "c04b2e0ddb612ba0d0cd41ce4b3686db757c1ae61208b7cbfcf8379057f366d4"
 dependencies = [
  "chumsky",
  "nutype",
@@ -1633,9 +1626,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.29.2"
+version = "1.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bed99139f7dac9b5cfe5f17be4d66dc7079a34dee1d74bcc77217119240e267c"
+checksum = "3c14b15dffa2f4bd712103e857140aa04a4f2ff6e955c77d7eb8e53ee02a3b64"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",

@@ -17,18 +17,17 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 
 [dependencies]
 ariadne = { version = "0.6.0", features = ["auto-color"] }
-chumsky = "0.14.1"
-clap = { version = "4.6.7", features = ["derive", "cargo"] }
+chumsky = "0.14.2"
+clap = { version = "4.6.9", features = ["derive", "cargo"] }
 dirs2 = "3.0.1"
 fs-err = "3.3.2"
-humantime = "2.4.0"
 linemux = "0.3.0"
 
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
 notify-rust = "4.19.0"
-redb = "4.6.0"
-sl-chat-log-parser = "0.10.0"
-sl-types = { version = "0.12.0", features = ["chumsky"] }
+redb = "5.0.0"
+sl-chat-log-parser = "0.11.0"
+sl-types = { version = "0.13.0", features = ["chumsky"] }
 thiserror = { version = "2.0.21" }
 time = { version = "0.3.55", features = ["formatting", "parsing", "macros"] }
 tokio = { version = "1.54.1", features = ["full"] }

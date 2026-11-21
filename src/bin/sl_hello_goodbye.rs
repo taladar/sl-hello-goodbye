@@ -291,6 +291,45 @@ fn write_last_seen_to_db(
     Ok(())
 }
 
+/// format a duration for display with whole-second precision, for example
+/// `1year 2months 3days 4h 5m 6s`
+///
+/// A year counts as 365.25 days and a month as 30.44 days. Units with a value
+/// of zero are left out.
+fn format_duration(duration: std::time::Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let years = total_seconds / 31_557_600;
+    let seconds_in_year = total_seconds % 31_557_600;
+    let months = seconds_in_year / 2_630_016;
+    let seconds_in_month = seconds_in_year % 2_630_016;
+    let days = seconds_in_month / 86_400;
+    let seconds_in_day = seconds_in_month % 86_400;
+    let hours = seconds_in_day / 3_600;
+    let minutes = seconds_in_day % 3_600 / 60;
+    let seconds = seconds_in_day % 60;
+
+    let parts = [
+        (years, "year", "years"),
+        (months, "month", "months"),
+        (days, "day", "days"),
+        (hours, "h", "h"),
+        (minutes, "m", "m"),
+        (seconds, "s", "s"),
+    ]
+    .into_iter()
+    .filter(|(value, _, _)| *value > 0)
+    .map(|(value, singular, plural)| {
+        format!("{value}{}", if value == 1 { singular } else { plural })
+    })
+    .collect::<Vec<_>>();
+
+    if parts.is_empty() {
+        "0s".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 /// The main behaviour of the binary should go here
 #[instrument]
 async fn do_stuff() -> Result<(), crate::Error> {
@@ -430,9 +469,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                         (
                             format!(
                                 "Last seen {} ago ({})",
-                                <humantime::Duration as From<std::time::Duration>>::from(
-                                    std_last_seen_age
-                                ),
+                                format_duration(std_last_seen_age),
                                 last_seen_timestamp
                             ),
                             Some(last_seen_age),
@@ -440,7 +477,7 @@ async fn do_stuff() -> Result<(), crate::Error> {
                     } else {
                         (
                             format!(
-                                "Could not convert last seen age to humantime: {last_seen_age}",
+                                "Could not convert last seen age to a duration: {last_seen_age}",
                             ),
                             Some(last_seen_age),
                         )
@@ -656,6 +693,33 @@ async fn main() -> Result<(), Error> {
 mod test {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn test_format_duration() {
+        for (seconds, expected) in [
+            (0, "0s"),
+            (1, "1s"),
+            (60, "1m"),
+            (3_600, "1h"),
+            (86_400, "1day"),
+            (172_800, "2days"),
+            (2_630_016, "1month"),
+            (5_260_032, "2months"),
+            (31_557_600, "1year"),
+            (63_115_200, "2years"),
+            (3_601, "1h 1s"),
+            (
+                31_557_600 + 2 * 2_630_016 + 3 * 86_400 + 4 * 3_600 + 5 * 60 + 6,
+                "1year 2months 3days 4h 5m 6s",
+            ),
+        ] {
+            assert_eq!(
+                format_duration(std::time::Duration::from_secs(seconds)),
+                expected,
+                "formatting {seconds} seconds"
+            );
+        }
+    }
 
     #[tokio::test]
     #[tracing_test::traced_test]
