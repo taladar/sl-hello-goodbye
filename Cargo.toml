@@ -37,11 +37,8 @@ tracing-appender = { version = "0.2.5" }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }
 
 [dev-dependencies]
-dotenvy = "0.15.7"
-envy = "0.4.2"
 pretty_assertions = { version = "1.4.1" }
 serde = { version = "1.0.229", features = ["derive"] }
-serde-aux = { version = "4.7.0", default-features = false }
 tracing-test = "0.2.6"
 
 [profile.release]
