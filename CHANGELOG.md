@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.6 - 2026-11-24 19:30:47Z
+
+### ⚙️ Miscellaneous Tasks
+
+- *(deny)* Remove advisory ignores that no longer match
+- *(dependencies)* Update dependencies
+
 ## 0.4.5 - 2026-11-21 12:45:36Z
 
 ### ⚙️ Miscellaneous Tasks
