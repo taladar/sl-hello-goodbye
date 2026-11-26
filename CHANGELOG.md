@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.7 - 2026-11-26 18:55:09Z
+
+### ⚙️ Miscellaneous Tasks
+
+- *(dependencies)* Remove unused dev-dependencies
+- *(dependencies)* Update dependencies
+
 ## 0.4.6 - 2026-11-24 19:30:47Z
 
 ### ⚙️ Miscellaneous Tasks
